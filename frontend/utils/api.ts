@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { storage } from './storage';
 
-const API_URL = 'http://192.168.1.12:3000/api'; // Change to your backend IP
+const API_URL = 'http://192.168.0.111:3000/api'; // Change to your backend IP
 
 class ApiClient {
   private client: AxiosInstance;
@@ -34,15 +34,13 @@ class ApiClient {
         if (error.response?.status === 401) {
           // Token expired or invalid - clear auth and redirect to login
           await storage.clearAll();
-          // You'll need to navigate to login here
-          // For now, just reject
         }
         return Promise.reject(error);
       }
     );
   }
 
-  // Auth endpoints
+  // ==================== Auth Endpoints ====================
   async login(email: string, password: string) {
     const response = await this.client.post('/auth/login', { email, password });
     return response.data;
@@ -52,7 +50,7 @@ class ApiClient {
     const response = await this.client.post('/auth/register', {
       email,
       password,
-      display_name: displayName,
+      displayName,
     });
     return response.data;
   }
@@ -62,92 +60,147 @@ class ApiClient {
     return response.data;
   }
 
-  async refreshToken() {
-    const response = await this.client.post('/auth/refresh');
+  // ==================== Users Endpoints ====================
+  async searchUsers(query: string) {
+    const response = await this.client.get(`/users/search?q=${encodeURIComponent(query)}`);
     return response.data;
   }
 
-  // Threads endpoints
+  async getUserById(userId: string) {
+    const response = await this.client.get(`/users/${userId}`);
+    return response.data;
+  }
+
+  async updateProfile(data: { displayName?: string; avatarUrl?: string }) {
+    const response = await this.client.patch('/users/me', data);
+    return response.data;
+  }
+
+  // ==================== Contact Requests Endpoints ====================
+  async sendContactRequest(toUserId: string) {
+    const response = await this.client.post('/contacts', { toUserId });
+    return response.data;
+  }
+
+  async getPendingContactRequests() {
+    const response = await this.client.get('/contacts/pending');
+    return response.data;
+  }
+
+  async getContacts() {
+    const response = await this.client.get('/users/me/contacts');
+    return response.data;
+  }
+
+  async acceptContactRequest(requestId: string) {
+    const response = await this.client.post(`/contacts/${requestId}/accept`);
+    return response.data;
+  }
+
+  async rejectContactRequest(requestId: string) {
+    const response = await this.client.post(`/contacts/${requestId}/reject`);
+    return response.data;
+  }
+
+  // ==================== Threads Endpoints ====================
+  async createDirectThread(userId: string) {
+    const response = await this.client.post('/threads/direct', { userId });
+    return response.data;
+  }
+
   async getThreads() {
     const response = await this.client.get('/threads');
     return response.data;
   }
 
-  async createThread(participantIds: number[]) {
-    const response = await this.client.post('/threads', { participant_ids: participantIds });
+  async getThreadDetails(threadId: string) {
+    const response = await this.client.get(`/threads/${threadId}`);
     return response.data;
   }
 
-  // Messages endpoints
-  async getMessages(threadId: number) {
-    const response = await this.client.get(`/messages?threadId=${threadId}`);
+  // ==================== Messages Endpoints ====================
+  async getMessages(threadId: string, limit = 50, before?: string) {
+    let url = `/messages/${threadId}?limit=${limit}`;
+    if (before) {
+      url += `&before=${before}`;
+    }
+    const response = await this.client.get(url);
     return response.data;
   }
 
-  async sendMessage(threadId: number, body: string, attachments?: string[]) {
-    const response = await this.client.post('/messages', {
-      thread_id: threadId,
-      body,
-      attachments,
+  async sendMessage(threadId: string, body: string, image?: File) {
+    const formData = new FormData();
+    formData.append('body', body);
+    if (image) {
+      formData.append('image', image);
+    }
+    
+    const response = await this.client.post(`/messages/${threadId}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
     });
     return response.data;
   }
 
-  async editMessage(messageId: number, body: string) {
-    const response = await this.client.put(`/messages/${messageId}`, { body });
+  async editMessage(messageId: string, body: string) {
+    const response = await this.client.patch(`/messages/${messageId}`, { body });
     return response.data;
   }
 
-  async deleteMessage(messageId: number) {
+  async deleteMessage(messageId: string) {
     const response = await this.client.delete(`/messages/${messageId}`);
     return response.data;
   }
 
-  // Contacts endpoints
-  async getContacts() {
-    const response = await this.client.get('/contacts');
+  async markMessageAsRead(messageId: string) {
+    const response = await this.client.post(`/messages/${messageId}/read`);
     return response.data;
   }
 
-  async addContact(contactId: number) {
-    const response = await this.client.post('/contacts', { contact_id: contactId });
+  // ==================== Groups Endpoints ====================
+  async createGroup(name: string, memberIds: string[], pictureUrl?: string) {
+    const response = await this.client.post('/groups', { 
+      name, 
+      memberIds,
+      pictureUrl 
+    });
     return response.data;
   }
 
-  async removeContact(contactId: number) {
-    const response = await this.client.delete(`/contacts/${contactId}`);
+  async updateGroup(groupId: string, data: { name?: string; pictureUrl?: string }) {
+    const response = await this.client.patch(`/groups/${groupId}`, data);
     return response.data;
   }
 
-  // Groups endpoints
-  async getGroups() {
-    const response = await this.client.get('/groups');
+  async addGroupMember(groupId: string, userId: string) {
+    const response = await this.client.post(`/groups/${groupId}/members`, { userId });
     return response.data;
   }
 
-  async createGroup(name: string, description?: string) {
-    const response = await this.client.post('/groups', { name, description });
+  async removeGroupMember(groupId: string, userId: string) {
+    const response = await this.client.delete(`/groups/${groupId}/members/${userId}`);
     return response.data;
   }
 
-  async getGroupMessages(groupId: number) {
-    const response = await this.client.get(`/groups/${groupId}/messages`);
+  async promoteToAdmin(groupId: string, userId: string) {
+    const response = await this.client.post(`/groups/${groupId}/members/${userId}/promote`);
     return response.data;
   }
 
-  async sendGroupMessage(groupId: number, body: string) {
-    const response = await this.client.post(`/groups/${groupId}/messages`, { body });
+  async leaveGroup(groupId: string) {
+    const response = await this.client.post(`/groups/${groupId}/leave`);
     return response.data;
   }
 
-  // Users endpoints
-  async searchUsers(query: string) {
-    const response = await this.client.get(`/users/search?q=${query}`);
+  // ==================== AI Search Endpoints ====================
+  async submitAIQuery(prompt: string) {
+    const response = await this.client.post('/ai/query', { prompt });
     return response.data;
   }
 
-  async updateProfile(data: { display_name?: string; avatar_url?: string }) {
-    const response = await this.client.put('/users/profile', data);
+  async getAIQueryHistory(limit = 20) {
+    const response = await this.client.get(`/ai/queries?limit=${limit}`);
     return response.data;
   }
 }

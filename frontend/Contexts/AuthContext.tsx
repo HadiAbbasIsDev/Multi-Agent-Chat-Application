@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { api } from '../utils/api';
 import { storage } from '../utils/storage';
+import { socketService } from '../utils/socket';
 
 interface User {
   id: string;
@@ -49,6 +50,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const currentUser = await api.getCurrentUser();
           console.log('✅ Token is valid, user verified');
           setUser(currentUser.user || currentUser);
+          
+          // Connect to Socket.IO
+          await socketService.connect();
         } catch (error) {
           console.warn('⚠️ Token invalid, clearing storage');
           await storage.clearAll();
@@ -90,6 +94,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(response.token);
       setUser(userData);
       
+      // Connect to Socket.IO
+      await socketService.connect();
+      
       console.log('✅ Sign in complete!');
     } catch (error: any) {
       console.error('❌ Login error:', error);
@@ -130,6 +137,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(response.token);
       setUser(userData);
       
+      // Connect to Socket.IO
+      await socketService.connect();
+      
       console.log('✅ Sign up complete!');
     } catch (error: any) {
       console.error('❌ Signup error:', error);
@@ -147,6 +157,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     try {
       console.log('👋 Signing out...');
+      
+      // Disconnect Socket.IO
+      socketService.disconnect();
+      
       await storage.clearAll();
       setToken(null);
       setUser(null);
