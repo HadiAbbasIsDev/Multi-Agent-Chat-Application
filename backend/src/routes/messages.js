@@ -12,13 +12,21 @@ const router = express.Router();
 router.use(authenticateToken);
 
 // Configure multer for image uploads
+// Use absolute path to ensure consistency with static file serving
+// Convert relative path to absolute path relative to backend root
+const uploadDir = path.isAbsolute(config.upload.uploadDir) 
+  ? config.upload.uploadDir 
+  : path.resolve(__dirname, '..', config.upload.uploadDir.replace(/^\.\//, ''));
+
+console.log('📁 Multer upload directory:', uploadDir);
+
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
-    const uploadDir = config.upload.uploadDir;
     try {
       await fs.mkdir(uploadDir, { recursive: true });
       cb(null, uploadDir);
     } catch (error) {
+      console.error('❌ Error creating upload directory:', error);
       cb(error);
     }
   },

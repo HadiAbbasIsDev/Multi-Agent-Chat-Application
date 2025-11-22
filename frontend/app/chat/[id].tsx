@@ -6,18 +6,23 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../Contexts/AuthContext';
 import { api } from '../../utils/api';
 import { socketService } from '../../utils/socket';
+import { UserProfileModal } from '../../Components/common/UserProfileModal';
+import { ImageViewerModal } from '../../Components/common/ImageViewerModal';
+import { Avatar } from '../../Components/common/Avatar';
 
 interface Message {
   id: string;
@@ -27,6 +32,15 @@ interface Message {
   createdAt: string;
   editedAt?: string;
   isDeleted?: boolean;
+  attachment?: {
+    id: string;
+    type: string;
+    mimeType: string;
+    sizeBytes: number;
+    storageUrl: string;
+    width?: number;
+    height?: number;
+  };
 }
 
 interface ThreadDetails {
@@ -62,6 +76,9 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<any>(null);
 
@@ -90,11 +107,14 @@ export default function ChatScreen() {
   // Scroll to bottom whenever messages change (after initial load)
   useEffect(() => {
     if (!loading && messages.length > 0) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      }, 200);
+      // Use requestAnimationFrame to ensure DOM is ready
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+        }, 300);
+      });
     }
-  }, [loading]);
+  }, [loading, messages.length]);
 
   const setupSocketListeners = () => {
     // Listen for new messages
@@ -114,10 +134,12 @@ export default function ChatScreen() {
             senderId: message.senderId,  // Ensure senderId is present
             senderName: message.senderName || 
               (message.senderId === user?.id 
-                ? user.displayName 
+                ? user?.displayName || 'You' 
                 : threadDetails?.otherUser?.displayName || 
                   threadDetails?.group?.members?.find((m: any) => m.userId === message.senderId)?.displayName || 
                   'Unknown'),
+            // Ensure attachment is included
+            attachment: message.attachment || message.data?.attachment || null,
           };
           
           console.log('✅ Adding message to state:', {
@@ -136,9 +158,11 @@ export default function ChatScreen() {
         }
         
         // Scroll to newest message
-        setTimeout(() => {
-          flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-        }, 100);
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 200);
+        });
       }
     });
 
@@ -216,15 +240,49 @@ export default function ChatScreen() {
     try {
       setLoading(true);
       const response = await api.getMessages(id);
-      const messages = response.messages || [];
+      let messages = response.messages || [];
+      
+      // Ensure messages are sorted: newest first (for inverted FlatList)
+      // Backend should return newest first, but let's ensure it
+      messages = messages.sort((a: Message, b: Message) => {
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        return timeB - timeA; // Newest first
+      });
+      
+      // Ensure all messages have attachment data if present
+      messages = messages.map((msg: Message) => ({
+        ...msg,
+        attachment: msg.attachment || null,
+      }));
+      
+      // Debug: Log messages with attachments
+      const messagesWithAttachments = messages.filter((m: Message) => m.attachment);
+      if (messagesWithAttachments.length > 0) {
+        console.log('📷 Messages with attachments:', messagesWithAttachments.map((m: Message) => ({
+          id: m.id,
+          attachment: m.attachment,
+          url: m.attachment?.storageUrl ? `http://192.168.0.111:3000${m.attachment.storageUrl}` : null,
+        })));
+      }
       
       console.log('📥 Loaded messages:', {
         count: messages.length,
-        firstMessage: messages[0]?.body,
-        lastMessage: messages[messages.length - 1]?.body
+        withAttachments: messagesWithAttachments.length,
+        newest: messages[0]?.body?.substring(0, 30),
+        oldest: messages[messages.length - 1]?.body?.substring(0, 30),
+        newestTime: messages[0]?.createdAt,
+        oldestTime: messages[messages.length - 1]?.createdAt
       });
       
       setMessages(messages);
+      
+      // Force scroll after messages are set
+      setTimeout(() => {
+        if (flatListRef.current && messages.length > 0) {
+          flatListRef.current.scrollToEnd({ animated: false });
+        }
+      }, 400);
     } catch (error) {
       console.error('Failed to load messages:', error);
       Alert.alert('Error', 'Failed to load messages');
@@ -233,11 +291,33 @@ export default function ChatScreen() {
     }
   };
 
+  const pickImage = async () => {
+    // Request permission
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'We need access to your photos to send images.');
+      return;
+    }
+
+    // Launch image picker
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setSelectedImage(result.assets[0].uri);
+    }
+  };
+
   const sendMessage = async () => {
-    if (!input.trim() || sending) return;
+    if ((!input.trim() && !selectedImage) || sending) return;
 
     const messageText = input.trim();
+    const imageToSend = selectedImage;
     setInput('');
+    setSelectedImage(null);
     
     // Stop typing indicator
     socketService.stopTyping(id);
@@ -247,16 +327,44 @@ export default function ChatScreen() {
 
     try {
       setSending(true);
-      const response = await api.sendMessage(id, messageText);
       
-      console.log('📤 Message sent, response:', response);
+      // Convert image URI to File/Blob for FormData
+      let imageFile: any = null;
+      if (imageToSend) {
+        const response = await fetch(imageToSend);
+        const blob = await response.blob();
+        const filename = imageToSend.split('/').pop() || 'image.jpg';
+        imageFile = {
+          uri: imageToSend,
+          type: blob.type || 'image/jpeg',
+          name: filename,
+        } as any;
+      }
+      
+      const response = await api.sendMessage(id, messageText, imageFile);
+      
+      console.log('📤 Message sent, full response:', JSON.stringify(response, null, 2));
+      
+      // Backend returns { message: 'Message sent', data: { ... } }
+      const messageData = response.data || response.message || response;
       
       // Ensure the message has the correct senderId
       const sentMessage = {
-        ...response.message,
-        senderId: response.message.senderId || user?.id,
-        senderName: response.message.senderName || user?.displayName,
+        id: messageData.id,
+        threadId: messageData.threadId || id,
+        senderId: messageData.senderId || user?.id,
+        body: messageData.body,
+        status: messageData.status,
+        createdAt: messageData.createdAt,
+        senderName: user?.displayName,
+        attachment: messageData.attachment || null,
       };
+      
+      console.log('📤 Processed sent message:', {
+        id: sentMessage.id,
+        hasAttachment: !!sentMessage.attachment,
+        attachmentUrl: sentMessage.attachment?.storageUrl,
+      });
       
       // Add message optimistically (will be deduplicated by socket listener)
       setMessages((prev) => {
@@ -267,13 +375,20 @@ export default function ChatScreen() {
         return [sentMessage, ...prev];
       });
       
-      // Scroll to top (which is the latest message since inverted)
-      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      // Scroll to bottom (newest message)
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      });
     } catch (error: any) {
       console.error('Failed to send message:', error);
       Alert.alert('Error', 'Failed to send message');
       // Restore the input if sending failed
       setInput(messageText);
+      if (imageToSend) {
+        setSelectedImage(imageToSend);
+      }
     } finally {
       setSending(false);
     }
@@ -346,44 +461,88 @@ export default function ChatScreen() {
     return '?';
   };
 
+  const getThreadAvatarUrl = () => {
+    if (!threadDetails) return null;
+    
+    if (threadDetails.type === 'GROUP' && threadDetails.group) {
+      return threadDetails.group.pictureUrl || null;
+    }
+    
+    if (threadDetails.type === 'DIRECT' && threadDetails.otherUser) {
+      return threadDetails.otherUser.avatarUrl || null;
+    }
+    
+    return null;
+  };
+
+  const getOtherUser = () => {
+    if (!threadDetails) return null;
+    if (threadDetails.type === 'DIRECT' && threadDetails.otherUser) {
+      return {
+        id: threadDetails.otherUser.id,
+        displayName: threadDetails.otherUser.displayName,
+        email: '', // We don't have email in threadDetails, but that's okay
+        avatarUrl: threadDetails.otherUser.avatarUrl,
+        lastActiveAt: threadDetails.otherUser.lastActiveAt,
+      };
+    }
+    return null;
+  };
+
   if (loading) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color="#000" />
           </TouchableOpacity>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>?</Text>
-          </View>
+          <Avatar letter="?" size={40} />
           <Text style={styles.name}>Loading...</Text>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* ─── Header ─── */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{getThreadAvatar()}</Text>
-        </View>
-        <Text style={styles.name}>{getThreadName()}</Text>
+        <Avatar 
+          letter={getThreadAvatar()} 
+          avatarUrl={getThreadAvatarUrl()}
+          size={40}
+        />
+        <TouchableOpacity
+          style={styles.nameContainer}
+          onPress={() => {
+            if (threadDetails?.type === 'DIRECT') {
+              setProfileModalVisible(true);
+            }
+          }}
+          activeOpacity={threadDetails?.type === 'DIRECT' ? 0.7 : 1}
+        >
+          <Text style={styles.name} numberOfLines={1}>
+            {getThreadName()}
+          </Text>
+          {threadDetails?.type === 'DIRECT' && (
+            <Ionicons name="chevron-forward" size={16} color="#666" style={styles.chevron} />
+          )}
+        </TouchableOpacity>
       </View>
 
-      {/* ─── Messages ─── */}
+      {/* ─── Messages Container ─── */}
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
+        <View style={styles.messagesWrapper}>
         {messages.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="chatbubble-outline" size={64} color="#ccc" />
@@ -399,13 +558,20 @@ export default function ChatScreen() {
             inverted
             keyExtractor={(item, index) => item.id || `message-${index}`}
             contentContainerStyle={styles.messageList}
-            maintainVisibleContentPosition={{
-              minIndexForVisible: 0,
+            onLayout={() => {
+              // Scroll to bottom when layout is ready
+              if (messages.length > 0 && !loading) {
+                setTimeout(() => {
+                  flatListRef.current?.scrollToEnd({ animated: false });
+                }, 100);
+              }
             }}
             onContentSizeChange={() => {
               // Scroll to bottom when content size changes (new messages)
-              if (!loading) {
-                flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+              if (!loading && messages.length > 0) {
+                requestAnimationFrame(() => {
+                  flatListRef.current?.scrollToEnd({ animated: false });
+                });
               }
             }}
             renderItem={({ item }) => {
@@ -426,6 +592,20 @@ export default function ChatScreen() {
                 console.warn('⚠️ Message missing senderId:', item);
               }
               
+              // Construct image URL - use the same base URL as API
+              const imageUrl = item.attachment?.storageUrl 
+                ? `http://192.168.0.111:3000${item.attachment.storageUrl}`
+                : null;
+              
+              // Debug attachment
+              if (item.attachment) {
+                console.log('📷 Message has attachment:', {
+                  messageId: item.id,
+                  storageUrl: item.attachment.storageUrl,
+                  fullUrl: imageUrl,
+                });
+              }
+              
               return (
                 <View
                   key={item.id || `msg-${item.createdAt}`}
@@ -437,9 +617,46 @@ export default function ChatScreen() {
                   {!isMe && threadDetails?.type === 'GROUP' && item.senderName && (
                     <Text style={styles.senderName}>{item.senderName}</Text>
                   )}
-                  <Text style={[styles.messageText, isMe && styles.textMe]}>
-                    {item.body}
-                  </Text>
+                  {imageUrl ? (
+                    <TouchableOpacity
+                      onPress={() => setViewingImage(imageUrl)}
+                      activeOpacity={0.9}
+                      style={styles.imageTouchable}
+                    >
+                      <Image
+                        source={{ uri: imageUrl }}
+                        style={styles.messageImage}
+                        resizeMode="cover"
+                        onError={(error) => {
+                          console.error('❌ Image load error:', {
+                            url: imageUrl,
+                            error: error.nativeEvent?.error,
+                            messageId: item.id,
+                            attachment: item.attachment,
+                          });
+                        }}
+                        onLoad={() => {
+                          console.log('✅ Image loaded successfully:', imageUrl);
+                        }}
+                        onLoadStart={() => {
+                          console.log('🔄 Loading image:', imageUrl);
+                        }}
+                      />
+                    </TouchableOpacity>
+                  ) : item.attachment ? (
+                    <View style={styles.imageErrorContainer}>
+                      <Ionicons name="image-outline" size={24} color="#999" />
+                      <Text style={styles.imageErrorText}>Image unavailable</Text>
+                      <Text style={[styles.imageErrorText, { fontSize: 10, marginTop: 4 }]}>
+                        {item.attachment.storageUrl}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {item.body && (
+                    <Text style={[styles.messageText, isMe && styles.textMe]}>
+                      {item.body}
+                    </Text>
+                  )}
                   <View style={styles.messageFooter}>
                     <Text style={[styles.time, isMe && styles.timeMe]}>
                       {formatTime(item.createdAt)}
@@ -451,47 +668,86 @@ export default function ChatScreen() {
             }}
           />
         )}
+        </View>
+
+        {/* ─── Typing Indicator ─── */}
+        {typingUsers.length > 0 && (
+          <View style={styles.typingContainer}>
+            <Text style={styles.typingText}>
+              {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+            </Text>
+          </View>
+        )}
+
+        {/* ─── Input ─── */}
+        <View style={styles.inputContainer}>
+          <TouchableOpacity
+            onPress={pickImage}
+            style={styles.attachButton}
+            disabled={sending}
+          >
+            <Ionicons name="add" size={28} color="#007AFF" />
+          </TouchableOpacity>
+          {selectedImage && (
+            <View style={styles.selectedImageContainer}>
+              <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
+              <TouchableOpacity
+                style={styles.removeImageButton}
+                onPress={() => setSelectedImage(null)}
+              >
+                <Ionicons name="close-circle" size={20} color="#FF3B30" />
+              </TouchableOpacity>
+            </View>
+          )}
+          <TextInput
+            style={styles.input}
+            placeholder="Type a message..."
+            value={input}
+            onChangeText={handleInputChange}
+            onSubmitEditing={() => sendMessage()}
+            returnKeyType="send"
+            editable={!sending}
+            multiline
+            maxLength={1000}
+          />
+          <TouchableOpacity
+            onPress={() => sendMessage()}
+            style={styles.sendBtn}
+            disabled={sending || (!input.trim() && !selectedImage)}
+          >
+            {sending ? (
+              <ActivityIndicator size="small" color="#007AFF" />
+            ) : (
+              <Ionicons
+                name="send"
+                size={24}
+                color={(input.trim() || selectedImage) ? '#007AFF' : '#ccc'}
+              />
+            )}
+          </TouchableOpacity>
+        </View>
       </KeyboardAvoidingView>
 
-      {/* ─── Typing Indicator ─── */}
-      {typingUsers.length > 0 && (
-        <View style={styles.typingContainer}>
-          <Text style={styles.typingText}>
-            {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
-          </Text>
-        </View>
+      {/* ─── Profile Modal ─── */}
+      {threadDetails?.type === 'DIRECT' && (
+        <UserProfileModal
+          visible={profileModalVisible}
+          onClose={() => setProfileModalVisible(false)}
+          user={getOtherUser()}
+          threadId={id}
+          onContactRemoved={() => {
+            router.back();
+          }}
+        />
       )}
 
-      {/* ─── Input ─── */}
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Type a message..."
-          value={input}
-          onChangeText={handleInputChange}
-          onSubmitEditing={sendMessage}
-          returnKeyType="send"
-          editable={!sending}
-          multiline
-          maxLength={1000}
-        />
-        <TouchableOpacity
-          onPress={sendMessage}
-          style={styles.sendBtn}
-          disabled={sending || !input.trim()}
-        >
-          {sending ? (
-            <ActivityIndicator size="small" color="#007AFF" />
-          ) : (
-            <Ionicons
-              name="send"
-              size={24}
-              color={input.trim() ? '#007AFF' : '#ccc'}
-            />
-          )}
-        </TouchableOpacity>
-      </View>
-    </View>
+      {/* ─── Image Viewer Modal ─── */}
+      <ImageViewerModal
+        visible={!!viewingImage}
+        imageUrl={viewingImage}
+        onClose={() => setViewingImage(null)}
+      />
+    </SafeAreaView>
   );
 }
 
@@ -506,29 +762,44 @@ const styles = StyleSheet.create({
 
   keyboardView: {
     flex: 1,
+    flexDirection: 'column',
+  },
+  messagesWrapper: {
+    flex: 1,
   },
 
   // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    paddingTop: 16,
     backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderColor: '#ddd',
+    minHeight: 64,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   backBtn: { marginRight: 12 },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#007AFF',
-    justifyContent: 'center',
+  nameContainer: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 10,
   },
-  avatarText: { color: '#fff', fontWeight: '600', fontSize: 16 },
-  name: { fontSize: 18, fontWeight: '600', flex: 1 },
+  name: { 
+    fontSize: 18, 
+    fontWeight: '600', 
+    flex: 1,
+    marginRight: 4,
+  },
+  chevron: {
+    marginLeft: 4,
+  },
 
   // Loading
   loadingContainer: {
@@ -558,7 +829,11 @@ const styles = StyleSheet.create({
   },
 
   // Messages
-  messageList: { padding: 12 },
+  messageList: { 
+    padding: 12,
+    paddingBottom: 8,
+    flexGrow: 1,
+  },
   messageBubble: {
     maxWidth: '75%',
     paddingHorizontal: 14,
@@ -584,6 +859,29 @@ const styles = StyleSheet.create({
   },
   messageText: { fontSize: 16, lineHeight: 20 },
   textMe: { color: '#fff' },
+  imageTouchable: {
+    marginBottom: 8,
+  },
+  messageImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+    backgroundColor: '#f0f0f0',
+  },
+  imageErrorContainer: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+    marginBottom: 8,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageErrorText: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 8,
+  },
   messageFooter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -618,16 +916,49 @@ const styles = StyleSheet.create({
   },
 
   // Input
+  // inputContainer: {
+  //   flexDirection: 'row',
+  //   paddingHorizontal: 12,
+  //   paddingVertical: 10,
+  //   backgroundColor
+
+  // Input
   inputContainer: {
     flexDirection: 'row',
     paddingHorizontal: 12,
     paddingVertical: 10,
-    marginBottom:20,
     paddingBottom: Platform.OS === 'ios' ? 12 : 10,
     backgroundColor: '#fff',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: '#ddd',
     alignItems: 'flex-end',
+    flexWrap: 'wrap',
+    width: '100%',
+  },
+  attachButton: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 40,
+    height: 40,
+    marginRight: 8,
+    marginBottom: 2,
+  },
+  selectedImageContainer: {
+    position: 'relative',
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  selectedImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#fff',
+    borderRadius: 10,
   },
   input: {
     flex: 1,

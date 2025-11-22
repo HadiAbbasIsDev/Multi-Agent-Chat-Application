@@ -281,7 +281,61 @@ router.post('/:requestId/reject', uuidParamValidation('requestId'), async (req, 
   }
 });
 
-// Cancel sent contact request
+// Remove contact (delete accepted contact request) - MUST be before /:requestId route
+router.delete('/user/:userId', uuidParamValidation('userId'), async (req, res) => {
+  const client = await getClient();
+  
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.user.id;
+
+    if (currentUserId === userId) {
+      return res.status(400).json({ error: 'Cannot remove yourself' });
+    }
+
+    await client.query('BEGIN');
+
+    // Find the accepted contact request (either direction)
+    const contactRequest = await client.query(
+      `SELECT id, from_user_id, to_user_id, status
+       FROM contact_requests
+       WHERE ((from_user_id = $1 AND to_user_id = $2)
+       OR (from_user_id = $2 AND to_user_id = $1))
+       AND status = 'ACCEPTED'`,
+      [currentUserId, userId]
+    );
+
+    if (contactRequest.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+
+    // Delete the contact request
+    await client.query(
+      `DELETE FROM contact_requests
+       WHERE id = $1`,
+      [contactRequest.rows[0].id]
+    );
+
+    await client.query('COMMIT');
+
+    // Emit socket event to the other user
+    const io = req.app.get('io');
+    io.to(userId).emit('contact_removed', {
+      removedBy: currentUserId
+    });
+
+    res.json({ message: 'Contact removed successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Remove contact error:', error);
+    res.status(500).json({ error: 'Failed to remove contact' });
+  } finally {
+    client.release();
+  }
+});
+
+// Cancel sent contact request - MUST be after /user/:userId route
 router.delete('/:requestId', uuidParamValidation('requestId'), async (req, res) => {
   try {
     const { requestId } = req.params;

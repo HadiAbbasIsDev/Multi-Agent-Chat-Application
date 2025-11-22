@@ -4,7 +4,11 @@ const config = require('../config');
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
+    console.log('Validation errors:', errors.array());
+    return res.status(400).json({ 
+      error: errors.array()[0]?.msg || 'Validation failed',
+      errors: errors.array() 
+    });
   }
   next();
 };
@@ -39,6 +43,18 @@ const loginValidation = [
   validate
 ];
 
+const updatePasswordValidation = [
+  body('currentPassword')
+    .notEmpty()
+    .withMessage('Current password is required'),
+  body('newPassword')
+    .isLength({ min: 8 })
+    .withMessage('New password must be at least 8 characters long')
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+    .withMessage('New password must contain at least one uppercase letter, one lowercase letter, and one number'),
+  validate
+];
+
 const updateProfileValidation = [
   body('displayName')
     .optional()
@@ -47,8 +63,24 @@ const updateProfileValidation = [
     .withMessage('Display name must be between 2 and 100 characters'),
   body('avatarUrl')
     .optional()
-    .isURL()
-    .withMessage('Avatar URL must be a valid URL'),
+    .custom((value) => {
+      // Accept both regular URLs and data URLs (base64 images)
+      if (typeof value !== 'string') {
+        throw new Error('Avatar URL must be a string');
+      }
+      // Check if it's a data URL
+      if (value.startsWith('data:image/')) {
+        return true;
+      }
+      // Check if it's a valid URL
+      try {
+        new URL(value);
+        return true;
+      } catch {
+        throw new Error('Avatar URL must be a valid URL or data URL');
+      }
+    })
+    .withMessage('Avatar URL must be a valid URL or data URL'),
   validate
 ];
 
@@ -129,6 +161,7 @@ const uuidParamValidation = (paramName) => [
 module.exports = {
   registerValidation,
   loginValidation,
+  updatePasswordValidation,
   updateProfileValidation,
   sendMessageValidation,
   editMessageValidation,

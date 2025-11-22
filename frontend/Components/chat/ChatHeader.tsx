@@ -1,9 +1,14 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { Avatar } from '../common/Avatar';
 
-export const ChatHeader = ({ name }: { name: string }) => (
+interface ChatHeaderProps {
+  name: string;
+  avatarUrl?: string | null;
+}
+
+export const ChatHeader = ({ name, avatarUrl }: ChatHeaderProps) => (
   <View style={styles.header}>
-    <Avatar letter={name[0]} />
+    <Avatar letter={name[0] || '?'} avatarUrl={avatarUrl} />
     <Text style={styles.name}>{name}</Text>
   </View>
 );

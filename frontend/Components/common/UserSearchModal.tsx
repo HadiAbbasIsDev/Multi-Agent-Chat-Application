@@ -33,12 +33,18 @@ interface UserSearchModalProps {
   visible: boolean;
   onClose: () => void;
   onRequestSent?: () => void;
+  onUserSelected?: (userId: string) => void;
+  excludeUserIds?: string[];
+  mode?: 'contact' | 'select' | 'message';
 }
 
 export const UserSearchModal: React.FC<UserSearchModalProps> = ({
   visible,
   onClose,
   onRequestSent,
+  onUserSelected,
+  excludeUserIds = [],
+  mode = 'contact',
 }) => {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
@@ -47,13 +53,21 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
   const [sendingRequest, setSendingRequest] = useState<string | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(false);
+  const [sentRequests, setSentRequests] = useState<Map<string, string>>(new Map()); // userId -> requestId
 
-  // Load user's contacts when modal opens
+  // Load user's contacts and sent requests when modal opens
   useEffect(() => {
     if (visible) {
       loadContacts();
+      if (mode === 'contact') {
+        loadSentRequests();
+      }
+      // If mode is 'message', load contacts and show them in search results
+      if (mode === 'message') {
+        loadContactsForMessage();
+      }
     }
-  }, [visible]);
+  }, [visible, mode]);
 
   const loadContacts = async () => {
     try {
@@ -67,6 +81,36 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
     }
   };
 
+  const loadSentRequests = async () => {
+    try {
+      const response = await api.getSentContactRequests();
+      const requestsMap = new Map<string, string>();
+      (response.requests || []).forEach((req: any) => {
+        if (req.toUser?.id) {
+          requestsMap.set(req.toUser.id, req.id);
+        }
+      });
+      setSentRequests(requestsMap);
+    } catch (error: any) {
+      console.error('Failed to load sent requests:', error);
+    }
+  };
+
+  const loadContactsForMessage = async () => {
+    try {
+      const response = await api.getContacts();
+      // Set contacts as search results for message mode
+      setSearchResults((response.contacts || []).map((contact: Contact) => ({
+        id: contact.id,
+        email: contact.email,
+        displayName: contact.displayName,
+        avatarUrl: contact.avatarUrl,
+      })));
+    } catch (error: any) {
+      console.error('Failed to load contacts for message:', error);
+    }
+  };
+
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
@@ -76,7 +120,11 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
     try {
       setLoading(true);
       const response = await api.searchUsers(searchQuery.trim());
-      setSearchResults(response.users || []);
+      // Filter out excluded users
+      const filtered = (response.users || []).filter(
+        (user: User) => !excludeUserIds.includes(user.id)
+      );
+      setSearchResults(filtered);
     } catch (error: any) {
       console.error('Search error:', error);
       Alert.alert('Error', 'Failed to search users');
@@ -89,13 +137,22 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
     return contacts.some((contact) => contact.id === userId);
   };
 
+  const hasSentRequest = (userId: string): boolean => {
+    return sentRequests.has(userId);
+  };
+
+  const getRequestId = (userId: string): string | undefined => {
+    return sentRequests.get(userId);
+  };
+
   const handleSendRequest = async (userId: string) => {
     try {
       setSendingRequest(userId);
       await api.sendContactRequest(userId);
       Alert.alert('Success', 'Contact request sent!');
       onRequestSent?.();
-      // Reload contacts to update the list
+      // Reload sent requests to update the list
+      await loadSentRequests();
       await loadContacts();
     } catch (error: any) {
       console.error('Send request error:', error);
@@ -104,6 +161,36 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
     } finally {
       setSendingRequest(null);
     }
+  };
+
+  const handleCancelRequest = async (userId: string, requestId: string, userName: string) => {
+    Alert.alert(
+      'Cancel Request',
+      `Do you want to cancel the contact request sent to ${userName}?`,
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setSendingRequest(userId);
+              await api.cancelContactRequest(requestId);
+              Alert.alert('Success', 'Contact request cancelled');
+              // Reload sent requests to update the list
+              await loadSentRequests();
+              onRequestSent?.();
+            } catch (error: any) {
+              console.error('Cancel request error:', error);
+              const errorMsg = error.response?.data?.error || 'Failed to cancel contact request';
+              Alert.alert('Error', errorMsg);
+            } finally {
+              setSendingRequest(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleMessageUser = async (userId: string, userName: string) => {
@@ -150,48 +237,99 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
         <View style={styles.modalContainer}>
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.title}>Add Contact</Text>
+            <Text style={styles.title}>
+              {mode === 'select' ? 'Add Member' : mode === 'message' ? 'New Message' : 'Add Contact'}
+            </Text>
             <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
               <Ionicons name="close" size={24} color="#000" />
             </TouchableOpacity>
           </View>
 
           {/* Search Input */}
-          <View style={styles.searchContainer}>
-            <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by email or name..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onSubmitEditing={handleSearch}
-              returnKeyType="search"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity
-                onPress={() => {
-                  setSearchQuery('');
-                  setSearchResults([]);
-                }}
-              >
-                <Ionicons name="close-circle" size={20} color="#999" />
-              </TouchableOpacity>
-            )}
-          </View>
+          {mode !== 'message' && (
+            <>
+              <View style={styles.searchContainer}>
+                <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search by email or name..."
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  onSubmitEditing={handleSearch}
+                  returnKeyType="search"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSearchQuery('');
+                      setSearchResults([]);
+                    }}
+                  >
+                    <Ionicons name="close-circle" size={20} color="#999" />
+                  </TouchableOpacity>
+                )}
+              </View>
 
-          <TouchableOpacity
-            style={styles.searchButton}
-            onPress={handleSearch}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.searchButtonText}>Search</Text>
-            )}
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.searchButton}
+                onPress={handleSearch}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.searchButtonText}>Search</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          )}
+
+          {mode === 'message' && (
+            <View style={styles.searchContainer}>
+              <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search contacts..."
+                value={searchQuery}
+                onChangeText={(text) => {
+                  setSearchQuery(text);
+                  // Filter contacts in real-time
+                  if (text.trim()) {
+                    const filtered = contacts.filter((contact) => {
+                      const name = contact.displayName.toLowerCase();
+                      const email = contact.email.toLowerCase();
+                      const query = text.toLowerCase();
+                      return name.includes(query) || email.includes(query);
+                    });
+                    setSearchResults(filtered.map((contact) => ({
+                      id: contact.id,
+                      email: contact.email,
+                      displayName: contact.displayName,
+                      avatarUrl: contact.avatarUrl,
+                    })));
+                  } else {
+                    // Show all contacts when search is empty
+                    loadContactsForMessage();
+                  }
+                }}
+                returnKeyType="search"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setSearchQuery('');
+                    loadContactsForMessage();
+                  }}
+                >
+                  <Ionicons name="close-circle" size={20} color="#999" />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
           {/* Results */}
           <View style={styles.resultsContainer}>
@@ -200,17 +338,19 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
                 <Ionicons name="person-outline" size={48} color="#ccc" />
                 <Text style={styles.emptyText}>No users found</Text>
                 <Text style={styles.emptySubtext}>
-                  Try searching with a different email or name
+                  {mode === 'message' ? 'No contacts match your search' : 'Try searching with a different email or name'}
                 </Text>
               </View>
             )}
 
             {searchResults.length === 0 && !loading && searchQuery.length === 0 && (
               <View style={styles.emptyState}>
-                <Ionicons name="search-outline" size={48} color="#ccc" />
-                <Text style={styles.emptyText}>Search for users</Text>
+                <Ionicons name={mode === 'message' ? 'people-outline' : 'search-outline'} size={48} color="#ccc" />
+                <Text style={styles.emptyText}>
+                  {mode === 'message' ? 'No contacts yet' : 'Search for users'}
+                </Text>
                 <Text style={styles.emptySubtext}>
-                  Enter an email or name to find contacts
+                  {mode === 'message' ? 'Add contacts to start messaging' : 'Enter an email or name to find contacts'}
                 </Text>
               </View>
             )}
@@ -220,6 +360,8 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => {
                 const alreadyAdded = isContact(item.id);
+                const requestSent = hasSentRequest(item.id);
+                const requestId = getRequestId(item.id);
                 
                 return (
                   <View style={styles.userItem}>
@@ -236,17 +378,52 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
                             <Text style={styles.addedBadgeText}>Added</Text>
                           </View>
                         )}
+                        {requestSent && !alreadyAdded && (
+                          <View style={styles.requestSentBadge}>
+                            <Text style={styles.requestSentBadgeText}>Request Sent</Text>
+                          </View>
+                        )}
                       </View>
                       <Text style={styles.userEmail}>{item.email}</Text>
                     </View>
                     
-                    {alreadyAdded ? (
+                    {mode === 'select' ? (
+                      <TouchableOpacity
+                        style={styles.addButton}
+                        onPress={() => {
+                          onUserSelected?.(item.id);
+                        }}
+                      >
+                        <Ionicons name="add-circle" size={24} color="#007AFF" />
+                      </TouchableOpacity>
+                    ) : mode === 'message' ? (
+                      // In message mode, all users shown are contacts, so show message button
                       <TouchableOpacity
                         style={styles.messageButton}
                         onPress={() => handleMessageUser(item.id, item.displayName)}
                       >
                         <Ionicons name="chatbubble" size={20} color="#fff" />
                         <Text style={styles.messageButtonText}>Message</Text>
+                      </TouchableOpacity>
+                    ) : alreadyAdded ? (
+                      <TouchableOpacity
+                        style={styles.messageButton}
+                        onPress={() => handleMessageUser(item.id, item.displayName)}
+                      >
+                        <Ionicons name="chatbubble" size={20} color="#fff" />
+                        <Text style={styles.messageButtonText}>Message</Text>
+                      </TouchableOpacity>
+                    ) : requestSent && requestId ? (
+                      <TouchableOpacity
+                        style={styles.cancelButton}
+                        onPress={() => handleCancelRequest(item.id, requestId, item.displayName)}
+                        disabled={sendingRequest === item.id}
+                      >
+                        {sendingRequest === item.id ? (
+                          <ActivityIndicator size="small" color="#FF3B30" />
+                        ) : (
+                          <Ionicons name="close-circle" size={24} color="#FF3B30" />
+                        )}
                       </TouchableOpacity>
                     ) : (
                       <TouchableOpacity
@@ -405,6 +582,25 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '600',
+  },
+  requestSentBadge: {
+    backgroundColor: '#FF9500',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  requestSentBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  cancelButton: {
+    padding: 8,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addButton: {
     padding: 8,

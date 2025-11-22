@@ -76,6 +76,14 @@ class ApiClient {
     return response.data;
   }
 
+  async updatePassword(currentPassword: string, newPassword: string) {
+    const response = await this.client.patch('/auth/password', {
+      currentPassword,
+      newPassword,
+    });
+    return response.data;
+  }
+
   // ==================== Contact Requests Endpoints ====================
   async sendContactRequest(toUserId: string) {
     const response = await this.client.post('/contacts', { toUserId });
@@ -84,6 +92,16 @@ class ApiClient {
 
   async getPendingContactRequests() {
     const response = await this.client.get('/contacts/pending');
+    return response.data;
+  }
+
+  async getSentContactRequests() {
+    const response = await this.client.get('/contacts/sent');
+    return response.data;
+  }
+
+  async cancelContactRequest(requestId: string) {
+    const response = await this.client.delete(`/contacts/${requestId}`);
     return response.data;
   }
 
@@ -99,6 +117,11 @@ class ApiClient {
 
   async rejectContactRequest(requestId: string) {
     const response = await this.client.post(`/contacts/${requestId}/reject`);
+    return response.data;
+  }
+
+  async removeContact(userId: string) {
+    const response = await this.client.delete(`/contacts/user/${userId}`);
     return response.data;
   }
 
@@ -128,11 +151,16 @@ class ApiClient {
     return response.data;
   }
 
-  async sendMessage(threadId: string, body: string, image?: File) {
+  async sendMessage(threadId: string, body: string, image?: any) {
     const formData = new FormData();
     formData.append('body', body);
     if (image) {
-      formData.append('image', image);
+      // React Native FormData format
+      formData.append('image', {
+        uri: image.uri,
+        type: image.type || 'image/jpeg',
+        name: image.name || 'image.jpg',
+      } as any);
     }
     
     const response = await this.client.post(`/messages/${threadId}`, formData, {
@@ -185,6 +213,11 @@ class ApiClient {
 
   async promoteToAdmin(groupId: string, userId: string) {
     const response = await this.client.post(`/groups/${groupId}/members/${userId}/promote`);
+    return response.data;
+  }
+
+  async demoteAdmin(groupId: string, userId: string) {
+    const response = await this.client.post(`/groups/${groupId}/members/${userId}/demote`);
     return response.data;
   }
 

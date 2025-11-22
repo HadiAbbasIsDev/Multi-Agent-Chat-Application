@@ -14,8 +14,11 @@ import {
 } from 'react-native';
 import { ChatListItem } from '../../Components/chat/ChatListItem';
 import { UserSearchModal } from '../../Components/common/UserSearchModal';
+import { UserSettingsModal } from '../../Components/common/UserSettingsModal';
+import { Avatar } from '../../Components/common/Avatar';
 import { useAuth } from '../../Contexts/AuthContext';
 import { api } from '../../utils/api';
+import { Alert } from 'react-native';
 
 interface Thread {
   id: string;
@@ -47,11 +50,17 @@ export default function Chats() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchModalVisible, setSearchModalVisible] = useState(false);
+  const [messageModalVisible, setMessageModalVisible] = useState(false);
+  const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredThreads, setFilteredThreads] = useState<Thread[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+  const [sentRequests, setSentRequests] = useState<any[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
 
   useEffect(() => {
     loadThreads();
+    loadPendingRequests();
   }, []);
 
   useEffect(() => {
@@ -70,7 +79,14 @@ export default function Chats() {
     try {
       setLoading(true);
       const response = await api.getThreads();
-      setThreads(response.threads || []);
+      // Filter to show only DIRECT threads (not groups) and only those with messages
+      const directThreads = (response.threads || []).filter(
+        (thread: Thread) => 
+          thread.type === 'DIRECT' && 
+          thread.lastMessage !== null && 
+          thread.lastMessage !== undefined
+      );
+      setThreads(directThreads);
     } catch (error) {
       console.error('Failed to load threads:', error);
     } finally {
@@ -81,7 +97,100 @@ export default function Chats() {
   const onRefresh = async () => {
     setRefreshing(true);
     await loadThreads();
+    await loadPendingRequests();
     setRefreshing(false);
+  };
+
+  const loadPendingRequests = async () => {
+    try {
+      setLoadingRequests(true);
+      const [pendingRes, sentRes] = await Promise.all([
+        api.getPendingContactRequests(),
+        api.getSentContactRequests(),
+      ]);
+      setPendingRequests(pendingRes.requests || []);
+      setSentRequests(sentRes.requests || []);
+    } catch (error: any) {
+      console.error('Failed to load pending requests:', error);
+      // Don't show error for rate limit - it's temporary
+      if (error.response?.status !== 429) {
+        // Only log non-rate-limit errors
+      }
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  const handleAcceptRequest = async (requestId: string) => {
+    try {
+      await api.acceptContactRequest(requestId);
+      Alert.alert('Success', 'Contact request accepted');
+      await loadPendingRequests();
+      await loadThreads();
+    } catch (error: any) {
+      console.error('Accept request error:', error);
+      const errorMsg = error.response?.data?.error || 'Failed to accept request';
+      Alert.alert('Error', errorMsg);
+    }
+  };
+
+  const handleRejectRequest = async (requestId: string) => {
+    Alert.alert(
+      'Reject Request',
+      'Are you sure you want to reject this contact request?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.rejectContactRequest(requestId);
+              Alert.alert('Success', 'Contact request rejected');
+              await loadPendingRequests();
+            } catch (error: any) {
+              console.error('Reject request error:', error);
+              const errorMsg = error.response?.data?.error || 'Failed to reject request';
+              Alert.alert('Error', errorMsg);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCancelSentRequest = async (requestId: string) => {
+    Alert.alert(
+      'Cancel Request',
+      'Are you sure you want to cancel this contact request?',
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.cancelContactRequest(requestId);
+              Alert.alert('Success', 'Contact request cancelled');
+              await loadPendingRequests();
+            } catch (error: any) {
+              console.error('Cancel request error:', error);
+              const errorMsg = error.response?.data?.error || 'Failed to cancel request';
+              Alert.alert('Error', errorMsg);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
   };
 
   const formatTime = (timestamp: string) => {
@@ -137,6 +246,19 @@ export default function Chats() {
     return '?';
   };
 
+  const getThreadAvatarUrl = (thread: Thread) => {
+    if (thread.type === 'GROUP' && thread.group) {
+      return thread.group.pictureUrl || null;
+    }
+    
+    // For direct threads, use otherUser avatarUrl
+    if (thread.type === 'DIRECT' && thread.otherUser) {
+      return thread.otherUser.avatarUrl || null;
+    }
+    
+    return null;
+  };
+
   const formatChatItem = (thread: Thread) => {
     return {
       id: thread.id,
@@ -146,6 +268,7 @@ export default function Chats() {
         ? formatTime(thread.lastMessage.timestamp)
         : '',
       avatar: getThreadAvatar(thread),
+      avatarUrl: getThreadAvatarUrl(thread),
       unreadCount: thread.unreadCount,
     };
   };
@@ -158,9 +281,20 @@ export default function Chats() {
             headerShown: true,
             title: 'Chats',
             headerRight: () => (
-              <TouchableOpacity onPress={() => setSearchModalVisible(true)}>
-                <Ionicons name="person-add" size={24} color="#007AFF" />
-              </TouchableOpacity>
+              <View style={styles.headerButtons}>
+                <TouchableOpacity
+                  onPress={() => setSearchModalVisible(true)}
+                  style={styles.headerButton}
+                >
+                  <Ionicons name="person-add" size={24} color="#007AFF" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setSettingsModalVisible(true)}
+                  style={styles.headerButton}
+                >
+                  <Ionicons name="settings" size={24} color="#007AFF" />
+                </TouchableOpacity>
+              </View>
             ),
           }}
         />
@@ -171,6 +305,10 @@ export default function Chats() {
           visible={searchModalVisible}
           onClose={() => setSearchModalVisible(false)}
           onRequestSent={loadThreads}
+        />
+        <UserSettingsModal
+          visible={settingsModalVisible}
+          onClose={() => setSettingsModalVisible(false)}
         />
       </>
     );
@@ -183,16 +321,101 @@ export default function Chats() {
           headerShown: true,
           title: 'Chats',
           headerRight: () => (
-            <TouchableOpacity
-              onPress={() => setSearchModalVisible(true)}
-              style={styles.headerButton}
-            >
-              <Ionicons name="person-add" size={24} color="#007AFF" />
-            </TouchableOpacity>
+            <View style={styles.headerButtons}>
+              <TouchableOpacity
+                onPress={() => setSearchModalVisible(true)}
+                style={styles.headerButton}
+              >
+                <Ionicons name="person-add" size={24} color="#007AFF" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setSettingsModalVisible(true)}
+                style={styles.headerButton}
+              >
+                <Ionicons name="settings" size={24} color="#007AFF" />
+              </TouchableOpacity>
+            </View>
           ),
         }}
       />
       <View style={styles.container}>
+        {/* Pending Requests Section */}
+        {(pendingRequests.length > 0 || sentRequests.length > 0) && (
+          <View style={styles.pendingRequestsSection}>
+            <Text style={styles.pendingRequestsTitle}>Pending Requests</Text>
+            
+            {/* Received Requests */}
+            {pendingRequests.length > 0 && (
+              <View style={styles.requestsGroup}>
+                <Text style={styles.requestsGroupTitle}>Received ({pendingRequests.length})</Text>
+                <FlatList
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  data={pendingRequests}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <View style={styles.requestItem}>
+                      <Avatar
+                        letter={getInitials(item.fromUser?.displayName || '?')}
+                        avatarUrl={item.fromUser?.avatarUrl}
+                        size={50}
+                      />
+                      <Text style={styles.requestName} numberOfLines={1}>
+                        {item.fromUser?.displayName || 'Unknown'}
+                      </Text>
+                      <View style={styles.requestActions}>
+                        <TouchableOpacity
+                          style={[styles.requestButton, styles.acceptButton]}
+                          onPress={() => handleAcceptRequest(item.id)}
+                        >
+                          <Ionicons name="checkmark" size={18} color="#fff" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.requestButton, styles.rejectButton]}
+                          onPress={() => handleRejectRequest(item.id)}
+                        >
+                          <Ionicons name="close" size={18} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                />
+              </View>
+            )}
+
+            {/* Sent Requests */}
+            {sentRequests.length > 0 && (
+              <View style={styles.requestsGroup}>
+                <Text style={styles.requestsGroupTitle}>Sent ({sentRequests.length})</Text>
+                <FlatList
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  data={sentRequests}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <View style={styles.requestItem}>
+                      <Avatar
+                        letter={getInitials(item.toUser?.displayName || '?')}
+                        avatarUrl={item.toUser?.avatarUrl}
+                        size={50}
+                      />
+                      <Text style={styles.requestName} numberOfLines={1}>
+                        {item.toUser?.displayName || 'Unknown'}
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.requestButton, styles.cancelButton]}
+                        onPress={() => handleCancelSentRequest(item.id)}
+                      >
+                        <Ionicons name="close-circle" size={18} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                />
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Search Bar */}
         {threads.length > 0 && (
           <View style={styles.searchContainer}>
@@ -249,12 +472,38 @@ export default function Chats() {
             }
           />
         )}
+
+        {/* Floating Action Button */}
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => setMessageModalVisible(true)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="add" size={28} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       <UserSearchModal
         visible={searchModalVisible}
         onClose={() => setSearchModalVisible(false)}
-        onRequestSent={loadThreads}
+        onRequestSent={() => {
+          loadThreads();
+          loadPendingRequests();
+        }}
+      />
+
+      <UserSearchModal
+        visible={messageModalVisible}
+        onClose={() => setMessageModalVisible(false)}
+        mode="message"
+        onRequestSent={() => {
+          loadThreads();
+        }}
+      />
+
+      <UserSettingsModal
+        visible={settingsModalVisible}
+        onClose={() => setSettingsModalVisible(false)}
       />
     </>
   );
@@ -268,8 +517,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#f9f9f9',
   },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerButton: {
-    marginRight: 12,
+    padding: 4,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -321,5 +575,75 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  pendingRequestsSection: {
+    backgroundColor: '#f8f8f8',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ddd',
+  },
+  pendingRequestsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 12,
+  },
+  requestsGroup: {
+    marginBottom: 12,
+  },
+  requestsGroupTitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#666',
+    marginBottom: 8,
+  },
+  requestItem: {
+    alignItems: 'center',
+    marginRight: 16,
+    width: 80,
+  },
+  requestName: {
+    fontSize: 12,
+    color: '#000',
+    marginTop: 6,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  requestActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  requestButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  acceptButton: {
+    backgroundColor: '#4CAF50',
+  },
+  rejectButton: {
+    backgroundColor: '#FF3B30',
+  },
+  cancelButton: {
+    backgroundColor: '#FF9500',
+  },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
 });

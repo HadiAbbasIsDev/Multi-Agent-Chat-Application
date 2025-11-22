@@ -3,7 +3,7 @@ import { Avatar } from '../common/Avatar';
 
 export const ChatListItem = ({ chat, onPress }: { chat: any; onPress: () => void }) => (
   <TouchableOpacity onPress={onPress} style={styles.container}>
-    <Avatar letter={chat.avatar} />
+    <Avatar letter={chat.avatar} avatarUrl={chat.avatarUrl} />
     <View style={styles.content}>
       <Text style={styles.name}>{chat.name}</Text>
       <Text style={styles.message} numberOfLines={1}>{chat.lastMessage}</Text>
