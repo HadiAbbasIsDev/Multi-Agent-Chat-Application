@@ -104,6 +104,8 @@ This creates 5 sample users (all password: `Test123!`):
 
 ## Running the Application
 
+### Start Backend Only
+
 **Development mode** (with auto-reload):
 
 ```bash
@@ -117,6 +119,41 @@ npm start
 ```
 
 The server will start on `http://localhost:3000`
+
+### Start Backend + RAG Service Together
+
+To start both the backend and RAG service with a single command:
+
+**Option 1: Using npm scripts (requires `concurrently` package)**
+
+First install concurrently:
+```bash
+npm install
+```
+
+Then run:
+```bash
+# Production mode
+npm run start:all
+
+# Development mode (with auto-reload)
+npm run dev:all
+```
+
+**Option 2: Using shell script**
+
+```bash
+./start-all.sh
+```
+
+Both services will start:
+- Backend: `http://localhost:3000`
+- RAG Service: `http://localhost:8000`
+
+**Note**: Make sure you have:
+1. Installed RAG service dependencies: `cd ../SmartApp_Clone/rag_service && pip install -r requirements.txt`
+2. Set up environment variables for RAG service (see RAG service README)
+3. Qdrant running on `http://localhost:6333`
 
 ## API Documentation
 

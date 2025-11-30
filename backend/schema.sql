@@ -70,6 +70,8 @@ CREATE TABLE groups (
     member_count INT DEFAULT 1,
     picture_url TEXT,
     max_members INT DEFAULT 200,
+    only_admins_change_picture BOOLEAN DEFAULT FALSE,
+    only_admins_send_messages BOOLEAN DEFAULT FALSE,
     FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE,
     FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
 );

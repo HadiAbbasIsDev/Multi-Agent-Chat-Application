@@ -52,6 +52,8 @@ interface GroupDetails {
     memberCount: number;
     pictureUrl?: string;
     maxMembers: number;
+    onlyAdminsChangePicture?: boolean;
+    onlyAdminsSendMessages?: boolean;
     yourRole: string;
     members?: any[];
   };
@@ -72,6 +74,8 @@ export default function GroupChatScreen() {
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const typingTimeoutRef = useRef<any>(null);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
@@ -116,6 +120,7 @@ export default function GroupChatScreen() {
             ...message,
             senderName: message.senderName || 'Unknown',
             attachment: message.attachment || null,
+            isSystemMessage: message.isSystemMessage || false, // Preserve system message flag
           };
           return [enrichedMessage, ...prev];
         });
@@ -149,12 +154,58 @@ export default function GroupChatScreen() {
         );
       }
     });
+
+    // Listen for member left events - backend sends this as new_message with isSystemMessage
+    // So it's already handled in onNewMessage above
+
+    // Listen for group updates (settings changes)
+    socketService.onGroupUpdated((data) => {
+      if (data.groupId === id) {
+        // Reload group details to get updated settings
+        loadGroupDetails();
+      }
+    });
+
+    // Listen for typing indicators
+    socketService.onUserTyping((data) => {
+      // Only show typing indicator for other users, not yourself
+      if (data.threadId === id && data.userId !== user?.id && data.displayName) {
+        setTypingUsers((prev) => {
+          if (!prev.includes(data.displayName)) {
+            return [...prev, data.displayName];
+          }
+          return prev;
+        });
+      }
+    });
+
+    socketService.onUserStoppedTyping((data) => {
+      // Only remove typing indicator for other users
+      if (data.threadId === id && data.userId !== user?.id && data.displayName) {
+        setTypingUsers((prev) => {
+          return prev.filter((name) => name !== data.displayName);
+        });
+      }
+    });
   };
 
   const cleanupSocketListeners = () => {
+    // Stop typing indicator when leaving
+    socketService.stopTyping(id);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    // Clear typing users
+    setTypingUsers([]);
+    
     socketService.off('new_message');
     socketService.off('message_edited');
     socketService.off('message_deleted');
+    socketService.off('member_removed');
+    socketService.off('user_typing');
+    socketService.off('user_stopped_typing');
+    socketService.off('group_updated');
   };
 
   const loadGroupDetails = async () => {
@@ -167,6 +218,30 @@ export default function GroupChatScreen() {
       Alert.alert('Error', 'Failed to load group details');
       router.back();
     }
+  };
+
+  const isAdmin = () => {
+    return groupDetails?.group?.yourRole === 'ADMIN' || groupDetails?.group?.ownerId === user?.id;
+  };
+
+  const canSendMessages = () => {
+    if (!groupDetails?.group) return false;
+    // If only admins can send messages, check if user is admin
+    if (groupDetails.group.onlyAdminsSendMessages) {
+      return isAdmin();
+    }
+    // Otherwise, all members can send
+    return true;
+  };
+
+  const canChangePicture = () => {
+    if (!groupDetails?.group) return false;
+    // If only admins can change picture, check if user is admin
+    if (groupDetails.group.onlyAdminsChangePicture) {
+      return isAdmin();
+    }
+    // Otherwise, all members can change
+    return true;
   };
 
   const loadMessages = async () => {
@@ -223,13 +298,51 @@ export default function GroupChatScreen() {
     }
   };
 
+  const handleInputChange = (text: string) => {
+    if (!canSendMessages()) return; // Don't allow typing if can't send
+    
+    setInput(text);
+
+    // Send typing indicator
+    if (text.length > 0) {
+      socketService.startTyping(id);
+      
+      // Clear existing timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      // Stop typing after 3 seconds of inactivity
+      typingTimeoutRef.current = setTimeout(() => {
+        socketService.stopTyping(id);
+      }, 3000);
+    } else {
+      socketService.stopTyping(id);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    }
+  };
+
   const sendMessage = async () => {
     if ((!input.trim() && !selectedImage) || sending) return;
+    
+    // Check if user can send messages
+    if (!canSendMessages()) {
+      Alert.alert('Permission Denied', 'Only admins can send messages in this group');
+      return;
+    }
 
     const messageText = input.trim();
     const imageToSend = selectedImage;
     setInput('');
     setSelectedImage(null);
+    
+    // Stop typing indicator
+    socketService.stopTyping(id);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
 
     try {
       setSending(true);
@@ -360,6 +473,7 @@ export default function GroupChatScreen() {
             avatarUrl={getGroupAvatarUrl()}
             size={40}
           />
+          <View style={{ width: 12 }} />
           <Text style={styles.name} numberOfLines={1}>
             {getGroupName()}
           </Text>
@@ -413,8 +527,29 @@ export default function GroupChatScreen() {
                 );
               }
 
-              const isMe = item.senderId === user?.id;
+              // Check if it's a system message (like "User left the group", "User added User", etc.)
+              const isSystemMessage = item.isSystemMessage || 
+                (item.body && (
+                  item.body.includes('left the group') || 
+                  (item.body.includes('removed') && item.body.includes('from the group')) ||
+                  (item.body.includes('added') && item.body.includes('to the group')) ||
+                  (item.body.includes('promoted') && item.body.includes('to admin')) ||
+                  (item.body.includes('demoted') && item.body.includes('to member'))
+                ));
               
+              if (isSystemMessage) {
+                return (
+                  <View style={styles.systemMessageContainer}>
+                    <Text style={styles.systemMessageText}>
+                      <Ionicons name="exit-outline" size={14} color="#666" /> {item.body}
+                    </Text>
+                  </View>
+                );
+              }
+
+              const isMe = item.senderId === user?.id;
+              // const SOCKET_URL ='http://192.168.0.111:3000';
+
               // Construct image URL
               const imageUrl = item.attachment?.storageUrl 
                 ? `http://192.168.0.111:3000${item.attachment.storageUrl}`
@@ -430,12 +565,37 @@ export default function GroupChatScreen() {
               }
               
               return (
-                <View
+                <TouchableOpacity
                   key={item.id || `msg-${item.createdAt}`}
                   style={[
                     styles.messageBubble,
                     isMe ? styles.bubbleMe : styles.bubbleOther,
                   ]}
+                  onLongPress={() => {
+                    if (isMe && !item.isDeleted && !item.isSystemMessage) {
+                      Alert.alert(
+                        'Message Options',
+                        'What would you like to do?',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Unsend',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                await api.unsendMessage(item.id);
+                                // Message will be updated via socket event
+                              } catch (error: any) {
+                                console.error('Unsend error:', error);
+                                Alert.alert('Error', error.response?.data?.error || 'Failed to unsend message');
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    }
+                  }}
+                  activeOpacity={isMe ? 0.7 : 1}
                 >
                   {!isMe && item.senderName && (
                     <Text style={styles.senderName}>{item.senderName}</Text>
@@ -486,22 +646,39 @@ export default function GroupChatScreen() {
                       {item.editedAt && ' (edited)'}
                     </Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             }}
           />
         )}
         </View>
 
+        {/* ─── Typing Indicator ─── */}
+        {typingUsers.length > 0 && (
+          <View style={styles.typingContainer}>
+            <Text style={styles.typingText}>
+              {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+            </Text>
+          </View>
+        )}
+
         {/* ─── Input ─── */}
-        <View style={styles.inputContainer}>
-        <TouchableOpacity
-          onPress={pickImage}
-          style={styles.attachButton}
-          disabled={sending}
-        >
-          <Ionicons name="add" size={28} color="#007AFF" />
-        </TouchableOpacity>
+        {!canSendMessages() ? (
+          <View style={styles.restrictedInputContainer}>
+            <Ionicons name="lock-closed" size={20} color="#999" />
+            <Text style={styles.restrictedText}>
+              Only admins can send messages in this group
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.inputContainer}>
+          <TouchableOpacity
+            onPress={pickImage}
+            style={styles.attachButton}
+            disabled={sending}
+          >
+            <Ionicons name="add" size={28} color="#007AFF" />
+          </TouchableOpacity>
         {selectedImage && (
           <View style={styles.selectedImageContainer}>
             <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
@@ -517,7 +694,7 @@ export default function GroupChatScreen() {
           style={styles.input}
           placeholder="Type a message..."
           value={input}
-          onChangeText={setInput}
+          onChangeText={handleInputChange}
           onSubmitEditing={sendMessage}
           returnKeyType="send"
           editable={!sending}
@@ -540,6 +717,7 @@ export default function GroupChatScreen() {
           )}
         </TouchableOpacity>
       </View>
+        )}
       </KeyboardAvoidingView>
 
       {/* Group Info Modal */}
@@ -566,7 +744,7 @@ export default function GroupChatScreen() {
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
-    backgroundColor: '#f2f2f7',
+    backgroundColor: '#f5f7fa',
   },
 
   keyboardView: {
@@ -586,13 +764,13 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     backgroundColor: '#fff',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#ddd',
+    borderColor: '#e0e0e0',
     minHeight: 64,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
   },
   backBtn: { marginRight: 12 },
   headerInfo: {
@@ -650,11 +828,23 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     backgroundColor: '#007AFF',
     borderBottomRightRadius: 4,
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
   bubbleOther: {
     alignSelf: 'flex-start',
-    backgroundColor: '#e5e5ea',
+    backgroundColor: '#fff',
     borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: '#e5e5ea',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   senderName: {
     fontSize: 12,
@@ -695,6 +885,35 @@ const styles = StyleSheet.create({
   time: { fontSize: 11, opacity: 0.7, alignSelf: 'flex-end' },
   timeMe: { color: '#fff' },
 
+  // System message (like "User left the group")
+  systemMessageContainer: {
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginVertical: 8,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 16,
+    maxWidth: '80%',
+  },
+  systemMessageText: {
+    fontSize: 13,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+
+  // Typing indicator
+  typingContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+  },
+  typingText: {
+    fontSize: 13,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+
   // Deleted message
   deletedBubble: {
     alignSelf: 'center',
@@ -713,13 +932,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 12,
     paddingVertical: 10,
-    // marginBottom: 20,
     paddingBottom: Platform.OS === 'ios' ? 12 : 10,
     backgroundColor: '#fff',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#ddd',
+    borderTopWidth: 1,
+    borderColor: '#E5E5EA',
     alignItems: 'flex-end',
     flexWrap: 'wrap',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 5,
   },
   attachButton: {
     justifyContent: 'center',
@@ -748,20 +971,41 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    backgroundColor: '#f1f1f1',
-    borderRadius: 20,
-    paddingHorizontal: 16,
+    backgroundColor: '#F2F2F7',
+    borderRadius: 22,
+    paddingHorizontal: 18,
     paddingVertical: 10,
     fontSize: 16,
     marginRight: 8,
-    minHeight: 40,
+    minHeight: 44,
     maxHeight: 100,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    color: '#000',
   },
   sendBtn: { 
     justifyContent: 'center',
     alignItems: 'center',
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F2F2F7',
     marginBottom: 2,
+  },
+  restrictedInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: '#F5F5F5',
+    borderTopWidth: 1,
+    borderTopColor: '#E5E5EA',
+  },
+  restrictedText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
   },
 });

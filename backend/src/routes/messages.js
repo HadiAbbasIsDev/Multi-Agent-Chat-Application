@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
 const { query, getClient } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const { sendMessageValidation, editMessageValidation, uuidParamValidation } = require('../middleware/validation');
@@ -14,11 +15,15 @@ router.use(authenticateToken);
 // Configure multer for image uploads
 // Use absolute path to ensure consistency with static file serving
 // Convert relative path to absolute path relative to backend root
+// IMPORTANT: __dirname here is backend/src/routes, so we go up 2 levels to get backend root
+const backendRoot = path.resolve(__dirname, '..', '..');
 const uploadDir = path.isAbsolute(config.upload.uploadDir) 
   ? config.upload.uploadDir 
-  : path.resolve(__dirname, '..', config.upload.uploadDir.replace(/^\.\//, ''));
+  : path.resolve(backendRoot, config.upload.uploadDir.replace(/^\.\//, ''));
 
 console.log('📁 Multer upload directory:', uploadDir);
+console.log('📁 Backend root:', backendRoot);
+console.log('📁 Config uploadDir:', config.upload.uploadDir);
 
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
@@ -142,14 +147,40 @@ router.post('/:threadId', uuidParamValidation('threadId'), upload.single('image'
     );
 
     // Create read receipts for all participants except sender
+    // For direct chats, mark as delivered immediately
+    // For group chats, only create receipt (not delivered yet)
+    const threadType = threadCheck.rows[0].type;
     for (const participant of participantsResult.rows) {
-      await client.query(
-        'INSERT INTO read_receipts (message_id, user_id) VALUES ($1, $2)',
-        [message.id, participant.user_id]
-      );
+      if (threadType === 'DIRECT') {
+        // In direct chats, mark as delivered when message is sent
+        await client.query(
+          'INSERT INTO read_receipts (message_id, user_id, delivered_at) VALUES ($1, $2, CURRENT_TIMESTAMP)',
+          [message.id, participant.user_id]
+        );
+      } else {
+        // In group chats, just create receipt (will be marked delivered when user sees it)
+        await client.query(
+          'INSERT INTO read_receipts (message_id, user_id) VALUES ($1, $2)',
+          [message.id, participant.user_id]
+        );
+      }
     }
 
     await client.query('COMMIT');
+
+    // Index message to Qdrant (async, don't wait for response)
+    if (messageBody && messageBody.trim()) {
+      axios.post(`${config.rag.serviceUrl}/index-message`, {
+        message_id: message.id,
+        thread_id: message.thread_id,
+        sender_id: message.sender_id,
+        body: messageBody,
+        created_at: message.created_at.toISOString()
+      }).catch(err => {
+        console.error('Failed to index message to RAG service:', err.message);
+        // Don't fail the request if indexing fails
+      });
+    }
 
     // Emit socket event to all participants
     const io = req.app.get('io');
@@ -242,6 +273,8 @@ router.get('/:threadId', uuidParamValidation('threadId'), async (req, res) => {
       status: row.status,
       createdAt: row.created_at,
       editedAt: row.edited_at,
+      isRead: row.is_read || false,
+      isDelivered: row.is_delivered || false,
       attachment: row.attachment_id ? {
         id: row.attachment_id,
         type: row.attachment_type,
@@ -314,13 +347,68 @@ router.patch('/:messageId', [...uuidParamValidation('messageId'), ...editMessage
   }
 });
 
-// Delete message for all (within 10 minutes)
+// Unsend message (permanently delete from PostgreSQL and Qdrant)
+router.post('/:messageId/unsend', uuidParamValidation('messageId'), async (req, res) => {
+  try {
+    const { messageId } = req.params;
+
+    const messageCheck = await query(
+      'SELECT id, sender_id, thread_id, body, created_at FROM messages WHERE id = $1 AND deleted_at IS NULL',
+      [messageId]
+    );
+
+    if (messageCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    const message = messageCheck.rows[0];
+
+    if (message.sender_id !== req.user.id) {
+      return res.status(403).json({ error: 'Can only unsend your own messages' });
+    }
+
+    // Soft delete from PostgreSQL
+    await query(
+      'UPDATE messages SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [messageId]
+    );
+
+    // Delete from Qdrant if RAG service is available
+    if (config.rag && config.rag.serviceUrl && message.body) {
+      try {
+        const axios = require('axios');
+        await axios.delete(`${config.rag.serviceUrl}/delete-message/${messageId}`, {
+          timeout: 5000
+        }).catch(err => {
+          // Log but don't fail if Qdrant deletion fails
+          console.warn('Failed to delete message from Qdrant:', err.message);
+        });
+      } catch (error) {
+        console.warn('Qdrant deletion error (non-critical):', error.message);
+      }
+    }
+
+    // Emit socket event
+    const io = req.app.get('io');
+    io.to(message.thread_id).emit('message_deleted', {
+      id: messageId,
+      threadId: message.thread_id
+    });
+
+    res.json({ message: 'Message unsent' });
+  } catch (error) {
+    console.error('Unsend message error:', error);
+    res.status(500).json({ error: 'Failed to unsend message' });
+  }
+});
+
+// Delete message for all (within 10 minutes) - kept for backward compatibility
 router.delete('/:messageId', uuidParamValidation('messageId'), async (req, res) => {
   try {
     const { messageId } = req.params;
 
     const messageCheck = await query(
-      'SELECT id, sender_id, thread_id, created_at FROM messages WHERE id = $1 AND deleted_at IS NULL',
+      'SELECT id, sender_id, thread_id, created_at, body FROM messages WHERE id = $1 AND deleted_at IS NULL',
       [messageId]
     );
 
@@ -343,11 +431,25 @@ router.delete('/:messageId', uuidParamValidation('messageId'), async (req, res) 
       return res.status(400).json({ error: 'Can only delete messages within 10 minutes of sending' });
     }
 
-    // Soft delete
+    // Soft delete from PostgreSQL
     await query(
       'UPDATE messages SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
       [messageId]
     );
+
+    // Delete from Qdrant if RAG service is available
+    if (config.rag && config.rag.serviceUrl && message.body) {
+      try {
+        const axios = require('axios');
+        await axios.delete(`${config.rag.serviceUrl}/delete-message/${messageId}`, {
+          timeout: 5000
+        }).catch(err => {
+          console.warn('Failed to delete message from Qdrant:', err.message);
+        });
+      } catch (error) {
+        console.warn('Qdrant deletion error (non-critical):', error.message);
+      }
+    }
 
     // Emit socket event
     const io = req.app.get('io');
@@ -397,13 +499,18 @@ router.post('/:messageId/read', uuidParamValidation('messageId'), async (req, re
   try {
     const { messageId } = req.params;
 
-    await query(
+    const updateResult = await query(
       `UPDATE read_receipts
        SET read_at = CURRENT_TIMESTAMP, 
            delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP)
-       WHERE message_id = $1 AND user_id = $2 AND read_at IS NULL`,
+       WHERE message_id = $1 AND user_id = $2 AND read_at IS NULL
+       RETURNING message_id`,
       [messageId, req.user.id]
     );
+
+    if (updateResult.rows.length === 0) {
+      return res.json({ message: 'Message already read or not found' });
+    }
 
     // Update message status
     await query(
@@ -413,11 +520,13 @@ router.post('/:messageId/read', uuidParamValidation('messageId'), async (req, re
 
     // Emit socket event
     const io = req.app.get('io');
-    const messageResult = await query('SELECT sender_id FROM messages WHERE id = $1', [messageId]);
+    const messageResult = await query('SELECT sender_id, thread_id FROM messages WHERE id = $1', [messageId]);
     if (messageResult.rows.length > 0) {
-      io.to(messageResult.rows[0].sender_id).emit('message_read', {
+      const message = messageResult.rows[0];
+      io.to(message.sender_id).emit('message_read', {
         messageId,
-        userId: req.user.id
+        userId: req.user.id,
+        threadId: message.thread_id
       });
     }
 
@@ -425,6 +534,66 @@ router.post('/:messageId/read', uuidParamValidation('messageId'), async (req, re
   } catch (error) {
     console.error('Mark read error:', error);
     res.status(500).json({ error: 'Failed to mark message as read' });
+  }
+});
+
+// Mark all messages in a thread as read
+router.post('/thread/:threadId/read-all', uuidParamValidation('threadId'), async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    const userId = req.user.id;
+
+    // Check if user is participant
+    const isUserParticipant = await isParticipant(userId, threadId);
+    if (!isUserParticipant) {
+      return res.status(403).json({ error: 'Not a participant in this thread' });
+    }
+
+    // Get all unread messages in this thread that are not sent by current user
+    const unreadMessages = await query(
+      `SELECT m.id, m.sender_id
+       FROM messages m
+       LEFT JOIN read_receipts rr ON m.id = rr.message_id AND rr.user_id = $2
+       WHERE m.thread_id = $1 
+         AND m.deleted_at IS NULL 
+         AND m.sender_id != $2
+         AND (rr.read_at IS NULL OR rr.read_at IS NULL)`,
+      [threadId, userId]
+    );
+
+    // Mark all as read
+    for (const msg of unreadMessages.rows) {
+      await query(
+        `INSERT INTO read_receipts (message_id, user_id, read_at, delivered_at)
+         VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         ON CONFLICT (message_id, user_id) 
+         DO UPDATE SET read_at = CURRENT_TIMESTAMP, 
+                      delivered_at = COALESCE(read_receipts.delivered_at, CURRENT_TIMESTAMP)`,
+        [msg.id, userId]
+      );
+
+      // Update message status
+      await query(
+        `UPDATE messages SET status = 'READ' WHERE id = $1`,
+        [msg.id]
+      );
+
+      // Emit socket event to sender
+      const io = req.app.get('io');
+      io.to(msg.sender_id).emit('message_read', {
+        messageId: msg.id,
+        userId: userId,
+        threadId: threadId
+      });
+    }
+
+    res.json({ 
+      message: 'All messages marked as read',
+      count: unreadMessages.rows.length
+    });
+  } catch (error) {
+    console.error('Mark all read error:', error);
+    res.status(500).json({ error: 'Failed to mark messages as read' });
   }
 });
 

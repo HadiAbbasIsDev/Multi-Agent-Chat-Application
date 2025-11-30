@@ -1,8 +1,8 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { storage } from './storage';
 
-const API_URL = 'http://192.168.0.111:3000/api'; // Change to your backend IP
-
+// const API_URL = 'http://192.168.0.111:3000/api'; // Change to your backend IP
+const API_URL = 'http://192.168.0.111:3000/api';
 class ApiClient {
   private client: AxiosInstance;
 
@@ -181,8 +181,18 @@ class ApiClient {
     return response.data;
   }
 
+  async unsendMessage(messageId: string) {
+    const response = await this.client.post(`/messages/${messageId}/unsend`);
+    return response.data;
+  }
+
   async markMessageAsRead(messageId: string) {
     const response = await this.client.post(`/messages/${messageId}/read`);
+    return response.data;
+  }
+
+  async markThreadAsRead(threadId: string) {
+    const response = await this.client.post(`/messages/thread/${threadId}/read-all`);
     return response.data;
   }
 
@@ -196,7 +206,12 @@ class ApiClient {
     return response.data;
   }
 
-  async updateGroup(groupId: string, data: { name?: string; pictureUrl?: string }) {
+  async updateGroup(groupId: string, data: { 
+    name?: string; 
+    pictureUrl?: string;
+    onlyAdminsChangePicture?: boolean;
+    onlyAdminsSendMessages?: boolean;
+  }) {
     const response = await this.client.patch(`/groups/${groupId}`, data);
     return response.data;
   }

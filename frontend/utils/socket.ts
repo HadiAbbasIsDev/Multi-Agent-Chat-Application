@@ -1,14 +1,15 @@
 import { io, Socket } from 'socket.io-client';
 import { storage } from './storage';
 
-const SOCKET_URL = 'http://192.168.0.111:3000'; // Change to your backend IP
+// const SOCKET_URL = 'http://192.168.0.111:3000'; // Change to your backend IP
 
+const SOCKET_URL ='http://192.168.0.111:3000';
 class SocketService {
   private socket: Socket | null = null;
   private isConnected = false;
 
   async connect() {
-    if (this.socket && this.isConnected) {
+    if (this.socket && this.isConnected) { 
       console.log('Socket already connected');
       return;
     }
@@ -185,6 +186,12 @@ class SocketService {
       this.socket.on('group_updated', callback);
     }
   }
+
+  // onMessageRead(callback: (data: any) => void) {
+  //   if (this.socket) {
+  //     this.socket.on('message_read', callback);
+  //   }
+  // }
 
   // Remove all listeners
   removeAllListeners() {

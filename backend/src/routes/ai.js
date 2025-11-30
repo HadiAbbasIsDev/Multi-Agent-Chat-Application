@@ -28,32 +28,31 @@ router.post('/query', aiQueryValidation, async (req, res) => {
 
     const aiQuery = queryResult.rows[0];
 
-    // Call AI service (MongoDB Atlas Vector Search)
+    // Call RAG service
     try {
-      const aiServiceResponse = await axios.post(
-        `${config.ai.serviceUrl}/search`,
+      const ragServiceResponse = await axios.post(
+        `${config.rag.serviceUrl}/query`,
         {
-          userId: userId,
           query: prompt,
-          topK: 5
+          user_id: userId,
+          top_k: 10
         },
         {
           headers: {
-            'Authorization': `Bearer ${config.ai.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 30000 // 30 second timeout
+          timeout: 60000 // 60 second timeout (LLM can take time)
         }
       );
 
-      const { answer, citations } = aiServiceResponse.data;
+      const { response: answer } = ragServiceResponse.data;
 
-      // Store AI result
+      // Store AI result (citations can be null for now)
       const resultData = await client.query(
         `INSERT INTO ai_results (query_id, answer_text, citations)
          VALUES ($1, $2, $3)
          RETURNING id, query_id, answer_text, citations, created_at`,
-        [aiQuery.id, answer, JSON.stringify(citations)]
+        [aiQuery.id, answer, null]
       );
 
       const aiResult = resultData.rows[0];
@@ -73,26 +72,31 @@ router.post('/query', aiQueryValidation, async (req, res) => {
           createdAt: aiResult.created_at
         }
       });
-    } catch (aiError) {
+    } catch (ragError) {
       await client.query('ROLLBACK');
       
-      console.error('AI service error:', aiError.message);
+      console.error('RAG service error:', ragError.message);
       
-      // Check if it's a timeout or connection error
-      if (aiError.code === 'ECONNABORTED' || aiError.code === 'ECONNREFUSED') {
+      // Check if it's a timeout or connection error (service unavailable)
+      if (ragError.code === 'ECONNABORTED' || ragError.code === 'ECONNREFUSED' || ragError.code === 'ETIMEDOUT') {
         return res.status(503).json({ 
-          error: 'AI service is currently unavailable. Please try again later.' 
+          error: 'AI service is currently unavailable',
+          serviceUnavailable: true
         });
       }
 
-      // Check for AI service specific errors
-      if (aiError.response) {
-        return res.status(aiError.response.status).json({
-          error: aiError.response.data.error || 'AI service error'
+      // Check for RAG service specific errors
+      if (ragError.response) {
+        return res.status(ragError.response.status).json({
+          error: ragError.response.data?.detail || ragError.response.data?.error || 'RAG service error',
+          serviceUnavailable: ragError.response.status === 503
         });
       }
 
-      return res.status(500).json({ error: 'Failed to process AI query' });
+      return res.status(503).json({ 
+        error: 'AI service is currently unavailable',
+        serviceUnavailable: true
+      });
     }
   } catch (error) {
     await client.query('ROLLBACK');

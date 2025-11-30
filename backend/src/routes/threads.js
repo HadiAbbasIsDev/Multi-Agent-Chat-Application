@@ -120,7 +120,7 @@ router.get('/', async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Get direct threads
+    // Get direct threads with unread count
     const directThreads = await query(
       `SELECT ct.id, ct.type, ct.created_at, ct.last_message_at,
               CASE 
@@ -129,7 +129,8 @@ router.get('/', async (req, res) => {
               END as other_user_id,
               u.display_name, u.avatar_url, u.last_active_at,
               m.body as last_message_body, m.created_at as last_message_time,
-              ms.display_name as last_message_sender
+              ms.display_name as last_message_sender,
+              COALESCE(unread.count, 0) as unread_count
        FROM chat_threads ct
        INNER JOIN direct_threads dt ON ct.id = dt.thread_id
        INNER JOIN users u ON (
@@ -146,6 +147,15 @@ router.get('/', async (req, res) => {
          LIMIT 1
        ) m ON true
        LEFT JOIN users ms ON m.sender_id = ms.id
+       LEFT JOIN (
+         SELECT m.thread_id, COUNT(*) as count
+         FROM messages m
+         LEFT JOIN read_receipts rr ON m.id = rr.message_id AND rr.user_id = $1
+         WHERE m.deleted_at IS NULL 
+           AND m.sender_id != $1
+           AND (rr.read_at IS NULL)
+         GROUP BY m.thread_id
+       ) unread ON ct.id = unread.thread_id
        WHERE dt.user_a_id = $1 OR dt.user_b_id = $1
        ORDER BY ct.last_message_at DESC`,
       [userId]
@@ -179,6 +189,7 @@ router.get('/', async (req, res) => {
         type: row.type,
         createdAt: row.created_at,
         lastMessageAt: row.last_message_at,
+        unreadCount: parseInt(row.unread_count) || 0,
         otherUser: {
           id: row.other_user_id,
           displayName: row.display_name,
@@ -271,6 +282,7 @@ router.get('/:threadId', uuidParamValidation('threadId'), async (req, res) => {
       // Get group details
       const group = await query(
         `SELECT g.name, g.owner_id, g.member_count, g.picture_url, g.max_members,
+                g.only_admins_change_picture, g.only_admins_send_messages,
                 gm.role
          FROM groups g
          INNER JOIN group_members gm ON g.thread_id = gm.group_id
@@ -306,6 +318,8 @@ router.get('/:threadId', uuidParamValidation('threadId'), async (req, res) => {
           memberCount: groupData.member_count,
           pictureUrl: groupData.picture_url,
           maxMembers: groupData.max_members,
+          onlyAdminsChangePicture: groupData.only_admins_change_picture || false,
+          onlyAdminsSendMessages: groupData.only_admins_send_messages || false,
           yourRole: groupData.role,
           members: members.rows.map(m => ({
             userId: m.user_id,

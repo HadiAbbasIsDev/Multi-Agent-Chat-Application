@@ -1,0 +1,314 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" version="29.1.1">
+  <diagram id="ERD" name="Entity Relationship Diagram">
+    <mxGraphModel dx="4094" dy="2404" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="users" parent="1" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Users" vertex="1">
+          <mxGeometry height="222" width="350" x="-430" y="-10" as="geometry" />
+        </mxCell>
+        <mxCell id="users_id" parent="users" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK] id (UUID)" vertex="1">
+          <mxGeometry height="24" width="350" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="users_email" parent="users" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="email (VARCHAR(255), UNIQUE, NOT NULL)" vertex="1">
+          <mxGeometry height="24" width="350" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="users_password" parent="users" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="password_hash (VARCHAR(255), NOT NULL)" vertex="1">
+          <mxGeometry height="24" width="350" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="users_display" parent="users" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="display_name (VARCHAR(100), NOT NULL)" vertex="1">
+          <mxGeometry height="24" width="350" y="102" as="geometry" />
+        </mxCell>
+        <mxCell id="users_avatar" parent="users" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="avatar_url (TEXT)" vertex="1">
+          <mxGeometry height="24" width="350" y="126" as="geometry" />
+        </mxCell>
+        <mxCell id="users_created" parent="users" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="created_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="350" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="users_active" parent="users" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="last_active_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="350" y="174" as="geometry" />
+        </mxCell>
+        <mxCell id="users_blocked" parent="users" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="is_blocked (BOOLEAN, DEFAULT FALSE)" vertex="1">
+          <mxGeometry height="24" width="350" y="198" as="geometry" />
+        </mxCell>
+        <mxCell id="contacts" parent="1" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Contact Requests" vertex="1">
+          <mxGeometry height="174" width="300" x="410" y="-20" as="geometry" />
+        </mxCell>
+        <mxCell id="contacts_id" parent="contacts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK] id (UUID)" vertex="1">
+          <mxGeometry height="24" width="300" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="contacts_from" parent="contacts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontColor=#006EAF;" value="[FK] from_user_id (UUID) -&gt; Users" vertex="1">
+          <mxGeometry height="24" width="300" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="contacts_to" parent="contacts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontColor=#006EAF;" value="[FK] to_user_id (UUID) -&gt; Users" vertex="1">
+          <mxGeometry height="24" width="300" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="contacts_status" parent="contacts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="status (VARCHAR(20), DEFAULT &#39;PENDING&#39;)" vertex="1">
+          <mxGeometry height="24" width="300" y="102" as="geometry" />
+        </mxCell>
+        <mxCell id="contacts_created" parent="contacts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="created_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="300" y="126" as="geometry" />
+        </mxCell>
+        <mxCell id="contacts_responded" parent="contacts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="responded_at (TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="300" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="threads" parent="1" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="Chat Threads" vertex="1">
+          <mxGeometry height="126" width="240" x="910" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="threads_id" parent="threads" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK] id (UUID)" vertex="1">
+          <mxGeometry height="24" width="240" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="threads_type" parent="threads" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="type (VARCHAR(20), NOT NULL)" vertex="1">
+          <mxGeometry height="24" width="240" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="threads_created" parent="threads" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="created_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="240" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="threads_last" parent="threads" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="last_message_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="240" y="102" as="geometry" />
+        </mxCell>
+        <mxCell id="direct" parent="1" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="Direct Threads" vertex="1">
+          <mxGeometry height="102" width="280" x="60" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="direct_thread" parent="direct" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK,FK] thread_id (UUID) -&gt; Chat Threads" vertex="1">
+          <mxGeometry height="24" width="280" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="direct_a" parent="direct" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontColor=#006EAF;" value="[FK] user_a_id (UUID) -&gt; Users, NOT NULL" vertex="1">
+          <mxGeometry height="24" width="280" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="direct_b" parent="direct" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontColor=#006EAF;" value="[FK] user_b_id (UUID) -&gt; Users, NOT NULL" vertex="1">
+          <mxGeometry height="24" width="280" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="groups" parent="1" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="Groups" vertex="1">
+          <mxGeometry height="222" width="320" x="640" y="490" as="geometry" />
+        </mxCell>
+        <mxCell id="groups_thread" parent="groups" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK,FK] thread_id (UUID) -&gt; Chat Threads" vertex="1">
+          <mxGeometry height="24" width="320" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="groups_name" parent="groups" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="name (VARCHAR(100), NOT NULL)" vertex="1">
+          <mxGeometry height="24" width="320" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="groups_owner" parent="groups" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontColor=#006EAF;" value="[FK] owner_id (UUID) -&gt; Users, NOT NULL" vertex="1">
+          <mxGeometry height="24" width="320" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="groups_count" parent="groups" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="member_count (INT, DEFAULT 1)" vertex="1">
+          <mxGeometry height="24" width="320" y="102" as="geometry" />
+        </mxCell>
+        <mxCell id="groups_picture" parent="groups" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="picture_url (TEXT)" vertex="1">
+          <mxGeometry height="24" width="320" y="126" as="geometry" />
+        </mxCell>
+        <mxCell id="groups_max" parent="groups" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="max_members (INT, DEFAULT 200)" vertex="1">
+          <mxGeometry height="24" width="320" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="groups_pic_setting" parent="groups" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="only_admins_change_picture (BOOLEAN, DEFAULT FALSE)" vertex="1">
+          <mxGeometry height="24" width="320" y="174" as="geometry" />
+        </mxCell>
+        <mxCell id="groups_msg_setting" parent="groups" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="only_admins_send_messages (BOOLEAN, DEFAULT FALSE)" vertex="1">
+          <mxGeometry height="24" width="320" y="198" as="geometry" />
+        </mxCell>
+        <mxCell id="group_members" parent="1" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="Group Members" vertex="1">
+          <mxGeometry height="126" width="300" x="430" y="242" as="geometry" />
+        </mxCell>
+        <mxCell id="gm_group" parent="group_members" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK,FK] group_id (UUID) -&gt; Groups" vertex="1">
+          <mxGeometry height="24" width="300" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="gm_user" parent="group_members" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK,FK] user_id (UUID) -&gt; Users" vertex="1">
+          <mxGeometry height="24" width="300" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="gm_role" parent="group_members" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="role (VARCHAR(20), DEFAULT &#39;MEMBER&#39;)" vertex="1">
+          <mxGeometry height="24" width="300" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="gm_joined" parent="group_members" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="joined_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="300" y="102" as="geometry" />
+        </mxCell>
+        <mxCell id="messages" parent="1" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" value="Messages" vertex="1">
+          <mxGeometry height="222" width="280" x="-220" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="msg_id" parent="messages" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK] id (UUID)" vertex="1">
+          <mxGeometry height="24" width="280" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="msg_thread" parent="messages" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontColor=#006EAF;" value="[FK] thread_id (UUID) -&gt; Chat Threads, NOT NULL" vertex="1">
+          <mxGeometry height="24" width="280" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="msg_sender" parent="messages" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontColor=#006EAF;" value="[FK] sender_id (UUID) -&gt; Users, NOT NULL" vertex="1">
+          <mxGeometry height="24" width="280" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="msg_body" parent="messages" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="body (TEXT)" vertex="1">
+          <mxGeometry height="24" width="280" y="102" as="geometry" />
+        </mxCell>
+        <mxCell id="msg_status" parent="messages" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="status (VARCHAR(20), DEFAULT &#39;SENT&#39;)" vertex="1">
+          <mxGeometry height="24" width="280" y="126" as="geometry" />
+        </mxCell>
+        <mxCell id="msg_created" parent="messages" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="created_at (TIMESTAMP, DEFAULT CURRENT_TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="280" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="msg_edited" parent="messages" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="edited_at (TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="280" y="174" as="geometry" />
+        </mxCell>
+        <mxCell id="msg_deleted" parent="messages" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="deleted_at (TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="280" y="198" as="geometry" />
+        </mxCell>
+        <mxCell id="attachments" parent="1" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" value="Attachments" vertex="1">
+          <mxGeometry height="222" width="280" x="400" y="810" as="geometry" />
+        </mxCell>
+        <mxCell id="att_id" parent="attachments" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK] id (UUID)" vertex="1">
+          <mxGeometry height="24" width="280" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="att_msg" parent="attachments" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontColor=#006EAF;" value="[FK] message_id (UUID) -&gt; Messages, NOT NULL" vertex="1">
+          <mxGeometry height="24" width="280" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="att_type" parent="attachments" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="type (VARCHAR(20), DEFAULT &#39;IMAGE&#39;)" vertex="1">
+          <mxGeometry height="24" width="280" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="att_mime" parent="attachments" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="mime_type (VARCHAR(50), NOT NULL)" vertex="1">
+          <mxGeometry height="24" width="280" y="102" as="geometry" />
+        </mxCell>
+        <mxCell id="att_size" parent="attachments" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="size_bytes (BIGINT, NOT NULL)" vertex="1">
+          <mxGeometry height="24" width="280" y="126" as="geometry" />
+        </mxCell>
+        <mxCell id="att_url" parent="attachments" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="storage_url (TEXT, NOT NULL)" vertex="1">
+          <mxGeometry height="24" width="280" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="att_width" parent="attachments" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="width (INT)" vertex="1">
+          <mxGeometry height="24" width="280" y="174" as="geometry" />
+        </mxCell>
+        <mxCell id="att_height" parent="attachments" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="height (INT)" vertex="1">
+          <mxGeometry height="24" width="280" y="198" as="geometry" />
+        </mxCell>
+        <mxCell id="receipts" parent="1" style="swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" value="Read Receipts" vertex="1">
+          <mxGeometry height="126" width="280" x="190" y="580" as="geometry" />
+        </mxCell>
+        <mxCell id="rec_msg" parent="receipts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK,FK] message_id (UUID) -&gt; Messages" vertex="1">
+          <mxGeometry height="24" width="280" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="rec_user" parent="receipts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;fontStyle=1;fontColor=#B85450;" value="[PK,FK] user_id (UUID) -&gt; Users" vertex="1">
+          <mxGeometry height="24" width="280" y="54" as="geometry" />
+        </mxCell>
+        <mxCell id="rec_delivered" parent="receipts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="delivered_at (TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="280" y="78" as="geometry" />
+        </mxCell>
+        <mxCell id="rec_read" parent="receipts" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;" value="read_at (TIMESTAMP)" vertex="1">
+          <mxGeometry height="24" width="280" y="102" as="geometry" />
+        </mxCell>
+        <mxCell id="rel1" edge="1" parent="1" source="contacts" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=0;exitY=0.25;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#006EAF;" target="users" value="from_user">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <mxPoint x="320" y="140" as="sourcePoint" />
+            <mxPoint x="320" y="140" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel2" edge="1" parent="1" source="contacts" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#006EAF;" target="users_display" value="to_user">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <mxPoint x="320" y="240" as="sourcePoint" />
+            <mxPoint x="320" y="240" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel3" edge="1" parent="1" source="direct" style="endArrow=ERone;startArrow=ERone;html=1;rounded=0;exitX=1;exitY=0;exitDx=0;exitDy=0;strokeWidth=2;strokeColor=#82b366;" value="1">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points">
+              <mxPoint x="480" y="400" />
+              <mxPoint x="930" y="400" />
+            </Array>
+            <mxPoint x="360" y="475" as="sourcePoint" />
+            <mxPoint x="930" y="170" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel4" edge="1" parent="1" source="direct" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=0;exitY=0.25;exitDx=0;exitDy=0;entryX=1;entryY=1.026;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#006EAF;entryPerimeter=0;" target="users_blocked" value="user_a">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points">
+              <mxPoint x="40" y="437.5" />
+            </Array>
+            <mxPoint x="80" y="437.5" as="sourcePoint" />
+            <mxPoint x="200" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel5" edge="1" parent="1" source="direct" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0.753;entryY=1.121;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#006EAF;entryPerimeter=0;" target="users_blocked" value="user_b">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points">
+              <mxPoint x="40" y="512.5" />
+            </Array>
+            <mxPoint x="80" y="512.5" as="sourcePoint" />
+            <mxPoint x="200" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel6" edge="1" parent="1" source="groups" style="endArrow=ERone;startArrow=ERone;html=1;rounded=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;strokeWidth=2;strokeColor=#82b366;" value="1">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points">
+              <mxPoint x="800" y="340" />
+              <mxPoint x="800" y="100" />
+            </Array>
+            <mxPoint x="760" y="550" as="sourcePoint" />
+            <mxPoint x="910" y="100" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel7" edge="1" parent="1" source="groups" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#006EAF;exitX=0;exitY=0;exitDx=0;exitDy=0;" target="users_active" value="owner">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points" />
+            <mxPoint x="789" y="574" as="sourcePoint" />
+            <mxPoint x="-50" y="166" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel8" edge="1" parent="1" source="gm_joined" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=0.727;exitY=1.069;exitDx=0;exitDy=0;strokeWidth=2;strokeColor=#d6b656;exitPerimeter=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" target="groups" value="N">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points" />
+            <mxPoint x="840" y="490" as="sourcePoint" />
+            <mxPoint x="960" y="601" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel9" edge="1" parent="1" source="gm_group" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#006EAF;" target="users_created" value="N">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points">
+              <mxPoint x="340" y="270" />
+            </Array>
+            <mxPoint x="980" y="400" as="sourcePoint" />
+            <mxPoint x="320" y="200" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel10" edge="1" parent="1" source="msg_status" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;" target="threads" value="N">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points">
+              <mxPoint x="500" y="760" />
+              <mxPoint x="1040" y="770" />
+            </Array>
+            <mxPoint x="360" y="935" as="sourcePoint" />
+            <mxPoint x="880" y="230" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel11" edge="1" parent="1" source="messages" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.277;entryY=1.18;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#006EAF;entryPerimeter=0;" target="users_blocked" value="sender">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points" />
+            <mxPoint x="200" y="800" as="sourcePoint" />
+            <mxPoint x="200" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel12" edge="1" parent="1" source="att_size" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=-0.007;exitY=0.018;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;exitPerimeter=0;" target="msg_edited" value="N">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points">
+              <mxPoint x="360" y="935" />
+            </Array>
+            <mxPoint x="440" y="935" as="sourcePoint" />
+            <mxPoint x="360" y="935" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel13" edge="1" parent="1" source="receipts" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#b85450;" target="messages" value="N">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points">
+              <mxPoint x="160" y="680" />
+              <mxPoint x="130" y="700" />
+            </Array>
+            <mxPoint x="800" y="890" as="sourcePoint" />
+            <mxPoint x="360" y="935" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rel14" edge="1" parent="1" source="rec_msg" style="endArrow=ERmany;startArrow=ERone;html=1;rounded=0;entryX=0.509;entryY=1.003;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#006EAF;entryPerimeter=0;exitX=-0.002;exitY=0.171;exitDx=0;exitDy=0;exitPerimeter=0;" target="users_blocked" value="N">
+          <mxGeometry height="100" relative="1" width="100" as="geometry">
+            <Array as="points">
+              <mxPoint x="20" y="580" />
+            </Array>
+            <mxPoint x="202" y="640" as="sourcePoint" />
+            <mxPoint x="-209.03999999999996" y="290.004" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

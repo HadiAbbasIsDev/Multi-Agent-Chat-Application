@@ -4,8 +4,13 @@
   "description": "Chat application backend with AI features",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node start-services.js",
+    "start:backend": "node src/server.js",
+    "start:backend-only": "node src/server.js",
+    "start:rag": "cd ../SmartApp_Clone/rag_service && python3 main.py",
+    "start:all": "concurrently -n \"BACKEND,RAG\" -c \"blue,green\" \"npm run start:backend\" \"npm run start:rag\"",
     "dev": "nodemon src/server.js",
+    "dev:all": "concurrently -n \"BACKEND,RAG\" -c \"blue,green\" \"npm run dev\" \"npm run start:rag\"",
     "migrate": "node src/database/migrate.js",
     "seed": "node src/database/seed.js"
   },
@@ -30,6 +35,7 @@
     "axios": "^1.6.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "concurrently": "^8.2.2"
   }
 }

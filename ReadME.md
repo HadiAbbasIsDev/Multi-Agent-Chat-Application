@@ -1,11 +1,11 @@
 "#Semester 5 DB Project" 
 
 
-
+on local:
+sudo docker run -d -p 6333:6333 -v ~/qdrant_data:/qdrant/storage qdrant/qdrant
 
 to check DB run:
-psql -h localhost -p 5432 -U postgres -d eagri_backend on local machine
-
+psql -h localhost -p 5432 -U chat_user -d chat_app
 
 once its started:
 

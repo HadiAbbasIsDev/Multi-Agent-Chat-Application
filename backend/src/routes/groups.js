@@ -107,11 +107,12 @@ router.post('/', createGroupValidation, async (req, res) => {
 router.patch('/:groupId', [...uuidParamValidation('groupId'), ...updateGroupValidation], async (req, res) => {
   try {
     const { groupId } = req.params;
-    const { name, pictureUrl } = req.body;
+    const { name, pictureUrl, onlyAdminsChangePicture, onlyAdminsSendMessages } = req.body;
 
-    // Check if user is admin
+    // Check if user is admin or owner
     const adminCheck = await query(
-      `SELECT gm.role FROM group_members gm
+      `SELECT gm.role, g.owner_id FROM group_members gm
+       INNER JOIN groups g ON g.thread_id = gm.group_id
        WHERE gm.group_id = $1 AND gm.user_id = $2`,
       [groupId, req.user.id]
     );
@@ -120,7 +121,16 @@ router.patch('/:groupId', [...uuidParamValidation('groupId'), ...updateGroupVali
       return res.status(403).json({ error: 'Not a member of this group' });
     }
 
-    if (adminCheck.rows[0].role !== 'ADMIN') {
+    const isOwner = adminCheck.rows[0].owner_id === req.user.id;
+    const isAdmin = adminCheck.rows[0].role === 'ADMIN' || isOwner;
+
+    // Only owner can change settings
+    if ((onlyAdminsChangePicture !== undefined || onlyAdminsSendMessages !== undefined) && !isOwner) {
+      return res.status(403).json({ error: 'Only group owner can change settings' });
+    }
+
+    // Only admins can change name and picture
+    if ((name !== undefined || pictureUrl !== undefined) && !isAdmin) {
       return res.status(403).json({ error: 'Only admins can update group details' });
     }
 
@@ -138,6 +148,16 @@ router.patch('/:groupId', [...uuidParamValidation('groupId'), ...updateGroupVali
       values.push(pictureUrl);
     }
 
+    if (onlyAdminsChangePicture !== undefined) {
+      updates.push(`only_admins_change_picture = $${paramCount++}`);
+      values.push(onlyAdminsChangePicture);
+    }
+
+    if (onlyAdminsSendMessages !== undefined) {
+      updates.push(`only_admins_send_messages = $${paramCount++}`);
+      values.push(onlyAdminsSendMessages);
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
     }
@@ -147,7 +167,7 @@ router.patch('/:groupId', [...uuidParamValidation('groupId'), ...updateGroupVali
     const result = await query(
       `UPDATE groups SET ${updates.join(', ')}
        WHERE thread_id = $${paramCount}
-       RETURNING thread_id, name, picture_url`,
+       RETURNING thread_id, name, picture_url, only_admins_change_picture, only_admins_send_messages`,
       values
     );
 
@@ -158,7 +178,9 @@ router.patch('/:groupId', [...uuidParamValidation('groupId'), ...updateGroupVali
     io.to(groupId).emit('group_updated', {
       groupId: group.thread_id,
       name: group.name,
-      pictureUrl: group.picture_url
+      pictureUrl: group.picture_url,
+      onlyAdminsChangePicture: group.only_admins_change_picture,
+      onlyAdminsSendMessages: group.only_admins_send_messages
     });
 
     res.json({
@@ -166,7 +188,9 @@ router.patch('/:groupId', [...uuidParamValidation('groupId'), ...updateGroupVali
       group: {
         id: group.thread_id,
         name: group.name,
-        pictureUrl: group.picture_url
+        pictureUrl: group.picture_url,
+        onlyAdminsChangePicture: group.only_admins_change_picture,
+        onlyAdminsSendMessages: group.only_admins_send_messages
       }
     });
   } catch (error) {
@@ -250,14 +274,56 @@ router.post('/:groupId/members', [
       [groupId]
     );
 
+    // Get added user's display name
+    const addedUserInfo = await client.query(
+      'SELECT display_name FROM users WHERE id = $1',
+      [userId]
+    );
+    const addedUserName = addedUserInfo.rows[0]?.display_name || 'Someone';
+
+    // Get adder's display name
+    const adderInfo = await client.query(
+      'SELECT display_name FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const adderName = adderInfo.rows[0]?.display_name || 'Admin';
+
+    // Create a system message for adding member
+    const systemMessage = await client.query(
+      `INSERT INTO messages (thread_id, sender_id, body, status)
+       VALUES ($1, $2, $3, 'SENT')
+       RETURNING id, thread_id, sender_id, body, status, created_at`,
+      [groupId, req.user.id, `${adderName} added ${addedUserName} to the group`]
+    );
+
+    // Update thread's last_message_at
+    await client.query(
+      'UPDATE chat_threads SET last_message_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [groupId]
+    );
+
     await client.query('COMMIT');
 
     // Emit socket events
     const io = req.app.get('io');
+    const message = systemMessage.rows[0];
+    
     io.to(groupId).emit('member_added', {
       groupId: groupId,
       userId: userId,
       addedBy: req.user.id
+    });
+    
+    // Emit the system message as a new message
+    io.to(groupId).emit('new_message', {
+      id: message.id,
+      threadId: message.thread_id,
+      senderId: message.sender_id,
+      senderName: adderName,
+      body: message.body,
+      status: message.status,
+      createdAt: message.created_at,
+      isSystemMessage: true
     });
     
     io.to(userId).emit('added_to_group', {
@@ -330,14 +396,55 @@ router.delete('/:groupId/members/:userId', [
       [groupId]
     );
 
+    // Get removed user's display name
+    const removedUserInfo = await client.query(
+      'SELECT display_name FROM users WHERE id = $1',
+      [userId]
+    );
+    const removedUserName = removedUserInfo.rows[0]?.display_name || 'Someone';
+
+    // Get remover's display name
+    const removerInfo = await client.query(
+      'SELECT display_name FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const removerName = removerInfo.rows[0]?.display_name || 'Admin';
+
+    // Create a system message for removal
+    const systemMessage = await client.query(
+      `INSERT INTO messages (thread_id, sender_id, body, status)
+       VALUES ($1, $2, $3, 'SENT')
+       RETURNING id, thread_id, sender_id, body, status, created_at`,
+      [groupId, req.user.id, `${removerName} removed ${removedUserName} from the group`]
+    );
+
+    // Update thread's last_message_at
+    await client.query(
+      'UPDATE chat_threads SET last_message_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [groupId]
+    );
+
     await client.query('COMMIT');
 
     // Emit socket events
     const io = req.app.get('io');
+    const message = systemMessage.rows[0];
+    
     io.to(groupId).emit('member_removed', {
       groupId: groupId,
       userId: userId,
       removedBy: req.user.id
+    });
+    
+    // Emit the system message as a new message
+    io.to(groupId).emit('new_message', {
+      id: message.id,
+      threadId: message.thread_id,
+      senderId: message.sender_id,
+      body: message.body,
+      status: message.status,
+      createdAt: message.created_at,
+      isSystemMessage: true
     });
     
     io.to(userId).emit('removed_from_group', {
@@ -388,11 +495,53 @@ router.post('/:groupId/members/:userId/promote', [
       return res.status(400).json({ error: 'Member not found or already admin' });
     }
 
+    // Get promoted user's display name
+    const promotedUserInfo = await query(
+      'SELECT display_name FROM users WHERE id = $1',
+      [userId]
+    );
+    const promotedUserName = promotedUserInfo.rows[0]?.display_name || 'Someone';
+
+    // Get promoter's display name
+    const promoterInfo = await query(
+      'SELECT display_name FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const promoterName = promoterInfo.rows[0]?.display_name || 'Owner';
+
+    // Create a system message for promotion
+    const systemMessage = await query(
+      `INSERT INTO messages (thread_id, sender_id, body, status)
+       VALUES ($1, $2, $3, 'SENT')
+       RETURNING id, thread_id, sender_id, body, status, created_at`,
+      [groupId, req.user.id, `${promoterName} promoted ${promotedUserName} to admin`]
+    );
+
+    // Update thread's last_message_at
+    await query(
+      'UPDATE chat_threads SET last_message_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [groupId]
+    );
+
     // Emit socket event
     const io = req.app.get('io');
+    const message = systemMessage.rows[0];
+    
     io.to(groupId).emit('member_promoted', {
       groupId: groupId,
       userId: userId
+    });
+    
+    // Emit the system message as a new message
+    io.to(groupId).emit('new_message', {
+      id: message.id,
+      threadId: message.thread_id,
+      senderId: message.sender_id,
+      senderName: promoterName,
+      body: message.body,
+      status: message.status,
+      createdAt: message.created_at,
+      isSystemMessage: true
     });
 
     res.json({ message: 'Member promoted to admin' });
@@ -440,11 +589,53 @@ router.post('/:groupId/members/:userId/demote', [
       return res.status(400).json({ error: 'Admin not found' });
     }
 
+    // Get demoted user's display name
+    const demotedUserInfo = await query(
+      'SELECT display_name FROM users WHERE id = $1',
+      [userId]
+    );
+    const demotedUserName = demotedUserInfo.rows[0]?.display_name || 'Someone';
+
+    // Get demoter's display name
+    const demoterInfo = await query(
+      'SELECT display_name FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const demoterName = demoterInfo.rows[0]?.display_name || 'Owner';
+
+    // Create a system message for demotion
+    const systemMessage = await query(
+      `INSERT INTO messages (thread_id, sender_id, body, status)
+       VALUES ($1, $2, $3, 'SENT')
+       RETURNING id, thread_id, sender_id, body, status, created_at`,
+      [groupId, req.user.id, `${demoterName} demoted ${demotedUserName} to member`]
+    );
+
+    // Update thread's last_message_at
+    await query(
+      'UPDATE chat_threads SET last_message_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [groupId]
+    );
+
     // Emit socket event
     const io = req.app.get('io');
+    const message = systemMessage.rows[0];
+    
     io.to(groupId).emit('member_demoted', {
       groupId: groupId,
       userId: userId
+    });
+    
+    // Emit the system message as a new message
+    io.to(groupId).emit('new_message', {
+      id: message.id,
+      threadId: message.thread_id,
+      senderId: message.sender_id,
+      senderName: demoterName,
+      body: message.body,
+      status: message.status,
+      createdAt: message.created_at,
+      isSystemMessage: true
     });
 
     res.json({ message: 'Admin demoted to member' });
@@ -496,13 +687,50 @@ router.post('/:groupId/leave', uuidParamValidation('groupId'), async (req, res) 
       [groupId]
     );
 
+    // Get user's display name before removing
+    const userInfo = await client.query(
+      'SELECT display_name FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const userName = userInfo.rows[0]?.display_name || 'Someone';
+
+    // Create a system message for leaving
+    const systemMessage = await client.query(
+      `INSERT INTO messages (thread_id, sender_id, body, status)
+       VALUES ($1, $2, $3, 'SENT')
+       RETURNING id, thread_id, sender_id, body, status, created_at`,
+      [groupId, req.user.id, `${userName} left the group`]
+    );
+
+    // Update thread's last_message_at
+    await client.query(
+      'UPDATE chat_threads SET last_message_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [groupId]
+    );
+
     await client.query('COMMIT');
 
-    // Emit socket event
+    // Emit socket event with system message
     const io = req.app.get('io');
+    const message = systemMessage.rows[0];
+    
     io.to(groupId).emit('member_left', {
       groupId: groupId,
-      userId: req.user.id
+      userId: req.user.id,
+      userName: userName
+    });
+    
+    // Also emit as a new message so it appears in chat
+    // Make sure to include senderName for proper display
+    io.to(groupId).emit('new_message', {
+      id: message.id,
+      threadId: message.thread_id,
+      senderId: message.sender_id,
+      senderName: userName,
+      body: message.body,
+      status: message.status,
+      createdAt: message.created_at,
+      isSystemMessage: true
     });
 
     res.json({ message: 'Left group successfully' });

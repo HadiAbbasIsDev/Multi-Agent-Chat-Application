@@ -1,7 +1,7 @@
 // app/(tabs)/index.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Stack, useRouter, useFocusEffect } from 'expo-router';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -19,6 +19,7 @@ import { Avatar } from '../../Components/common/Avatar';
 import { useAuth } from '../../Contexts/AuthContext';
 import { api } from '../../utils/api';
 import { Alert } from 'react-native';
+import { socketService } from '../../utils/socket';
 
 interface Thread {
   id: string;
@@ -58,10 +59,92 @@ export default function Chats() {
   const [sentRequests, setSentRequests] = useState<any[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
 
+  // Ref to track if socket listeners are set up
+  const socketListenersSetup = useRef(false);
+
   useEffect(() => {
     loadThreads();
     loadPendingRequests();
+    
+    // Set up socket listeners for real-time updates
+    setupSocketListeners();
+    
+    // Cleanup on unmount
+    return () => {
+      cleanupSocketListeners();
+    };
   }, []);
+
+  // Refresh threads when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh threads when user navigates back to this screen
+      loadThreads();
+      loadPendingRequests();
+    }, [])
+  );
+
+  const setupSocketListeners = async () => {
+    if (socketListenersSetup.current) {
+      return; // Already set up
+    }
+
+    try {
+      // Ensure socket is connected
+      await socketService.connect();
+      
+      // Small delay to ensure socket is fully ready
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Listen for new messages - refresh threads when a new message arrives
+      socketService.onNewMessage((message) => {
+        console.log('📨 New message received on home screen:', message);
+        // Refresh threads to update last message and unread counts (silent refresh)
+        loadThreads(false);
+      });
+
+      // Listen for message edits - refresh to update last message
+      socketService.onMessageEdited((data) => {
+        console.log('✏️ Message edited on home screen:', data);
+        loadThreads(false);
+      });
+
+      // Listen for message deletions - refresh to update last message
+      socketService.onMessageDeleted((data) => {
+        console.log('🗑️ Message deleted on home screen:', data);
+        loadThreads(false);
+      });
+
+      // Listen for contact request events
+      socketService.onContactRequestReceived(() => {
+        console.log('📬 Contact request received');
+        loadPendingRequests();
+      });
+
+      socketService.onContactRequestAccepted(() => {
+        console.log('✅ Contact request accepted');
+        loadPendingRequests();
+        loadThreads(false);
+      });
+
+      socketListenersSetup.current = true;
+      console.log('✅ Socket listeners set up for home screen');
+    } catch (error) {
+      console.error('❌ Failed to set up socket listeners:', error);
+      // Retry after a delay if socket isn't ready
+      setTimeout(() => {
+        if (!socketListenersSetup.current) {
+          setupSocketListeners();
+        }
+      }, 2000);
+    }
+  };
+
+  const cleanupSocketListeners = () => {
+    // Note: We don't remove all listeners here because other screens might be using them
+    // The socket service manages listeners per event, so multiple components can listen
+    socketListenersSetup.current = false;
+  };
 
   useEffect(() => {
     if (searchQuery.trim()) {
@@ -75,9 +158,11 @@ export default function Chats() {
     }
   }, [searchQuery, threads]);
 
-  const loadThreads = async () => {
+  const loadThreads = async (showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
       const response = await api.getThreads();
       // Filter to show only DIRECT threads (not groups) and only those with messages
       const directThreads = (response.threads || []).filter(
@@ -86,11 +171,21 @@ export default function Chats() {
           thread.lastMessage !== null && 
           thread.lastMessage !== undefined
       );
+      
+      // Debug: Log unread counts
+      directThreads.forEach((thread: Thread) => {
+        if (thread.unreadCount && thread.unreadCount > 0) {
+          console.log(`📬 Thread ${thread.id} (${getThreadName(thread)}) has ${thread.unreadCount} unread messages`);
+        }
+      });
+      
       setThreads(directThreads);
     } catch (error) {
       console.error('Failed to load threads:', error);
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 

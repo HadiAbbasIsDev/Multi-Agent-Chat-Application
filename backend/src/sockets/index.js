@@ -146,7 +146,8 @@ module.exports = (io) => {
         if (isParticipant.rows.length > 0) {
           socket.to(threadId).emit('user_stopped_typing', {
             threadId,
-            userId: socket.userId
+            userId: socket.userId,
+            displayName: socket.user.display_name
           });
         }
       } catch (error) {

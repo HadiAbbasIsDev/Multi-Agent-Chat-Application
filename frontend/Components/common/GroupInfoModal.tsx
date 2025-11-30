@@ -35,6 +35,8 @@ interface GroupInfo {
     memberCount: number;
     pictureUrl?: string;
     maxMembers: number;
+    onlyAdminsChangePicture?: boolean;
+    onlyAdminsSendMessages?: boolean;
     yourRole: 'ADMIN' | 'MEMBER';
     members: GroupMember[];
   };
@@ -92,6 +94,16 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
 
   const isAdmin = () => {
     return groupInfo?.group?.yourRole === 'ADMIN' || isOwner();
+  };
+
+  const canChangePicture = () => {
+    if (!groupInfo?.group) return false;
+    // If only admins can change picture, check if user is admin
+    if (groupInfo.group.onlyAdminsChangePicture) {
+      return isAdmin();
+    }
+    // Otherwise, all members can change
+    return true;
   };
 
   const canPromote = (member: GroupMember) => {
@@ -366,13 +378,30 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                 {/* Group Name Section */}
                 <View style={styles.section}>
                   <View style={styles.groupNameRow}>
-                    <View style={styles.avatarWrapper}>
+                    <TouchableOpacity
+                      style={styles.avatarWrapper}
+                      onPress={() => {
+                        // Check if user can change picture
+                        if (!canChangePicture()) {
+                          Alert.alert('Permission Denied', 'Only admins can change the group picture');
+                          return;
+                        }
+                        // TODO: Add image picker functionality here if needed
+                        Alert.alert('Change Picture', 'Picture change feature coming soon');
+                      }}
+                      disabled={!canChangePicture()}
+                    >
                       <Avatar 
                         letter={getInitials(groupInfo.group.name)} 
                         avatarUrl={groupInfo.group.pictureUrl}
                         size={60}
                       />
-                    </View>
+                      {canChangePicture() && (
+                        <View style={styles.editPictureOverlay}>
+                          <Ionicons name="camera" size={16} color="#fff" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
                     <View style={styles.groupNameContainer}>
                       <Text style={styles.groupName}>{groupInfo.group.name}</Text>
                       <Text style={styles.memberCount}>
@@ -390,6 +419,95 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                     )}
                   </View>
                 </View>
+
+                {/* Group Settings - Only Owner */}
+                {isOwner() && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Group Settings</Text>
+                    
+                    {/* Only Admins Change Picture Toggle */}
+                    <View style={styles.settingRow}>
+                      <View style={styles.settingInfo}>
+                        <Text style={styles.settingLabel}>Only Admins Change Picture</Text>
+                        <Text style={styles.settingDescription}>
+                          When enabled, only admins can change the group picture
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[
+                          styles.toggle,
+                          groupInfo.group.onlyAdminsChangePicture ? styles.toggleActive : styles.toggleInactive
+                        ]}
+                        onPress={async () => {
+                          try {
+                            setActionLoading('settings');
+                            const newValue = !groupInfo.group?.onlyAdminsChangePicture;
+                            await api.updateGroup(threadId, { onlyAdminsChangePicture: newValue });
+                            setGroupInfo(prev => prev ? {
+                              ...prev,
+                              group: prev.group ? {
+                                ...prev.group,
+                                onlyAdminsChangePicture: newValue
+                              } : prev.group
+                            } : null);
+                            onGroupUpdated?.();
+                          } catch (error: any) {
+                            Alert.alert('Error', error.response?.data?.error || 'Failed to update setting');
+                          } finally {
+                            setActionLoading(null);
+                          }
+                        }}
+                        disabled={actionLoading === 'settings'}
+                      >
+                        <View style={[
+                          styles.toggleThumb,
+                          groupInfo.group.onlyAdminsChangePicture && styles.toggleThumbActive
+                        ]} />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Only Admins Send Messages Toggle */}
+                    <View style={styles.settingRow}>
+                      <View style={styles.settingInfo}>
+                        <Text style={styles.settingLabel}>Only Admins Send Messages</Text>
+                        <Text style={styles.settingDescription}>
+                          When enabled, only admins can send messages in this group
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[
+                          styles.toggle,
+                          groupInfo.group.onlyAdminsSendMessages ? styles.toggleActive : styles.toggleInactive
+                        ]}
+                        onPress={async () => {
+                          try {
+                            setActionLoading('settings');
+                            const newValue = !groupInfo.group?.onlyAdminsSendMessages;
+                            await api.updateGroup(threadId, { onlyAdminsSendMessages: newValue });
+                            setGroupInfo(prev => prev ? {
+                              ...prev,
+                              group: prev.group ? {
+                                ...prev.group,
+                                onlyAdminsSendMessages: newValue
+                              } : prev.group
+                            } : null);
+                            onGroupUpdated?.();
+                          } catch (error: any) {
+                            Alert.alert('Error', error.response?.data?.error || 'Failed to update setting');
+                          } finally {
+                            setActionLoading(null);
+                          }
+                        }}
+                        disabled={actionLoading === 'settings'}
+                      >
+                        <View style={[
+                          styles.toggleThumb,
+                          groupInfo.group.onlyAdminsSendMessages && styles.toggleThumbActive
+                        ]} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
 
                 {/* Admin Actions */}
                 {isAdmin() && (
@@ -652,12 +770,77 @@ const styles = StyleSheet.create({
     color: '#000',
     marginBottom: 12,
   },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E5EA',
+  },
+  settingInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  settingLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#000',
+    marginBottom: 4,
+  },
+  settingDescription: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 18,
+  },
+  toggle: {
+    width: 50,
+    height: 30,
+    borderRadius: 15,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleActive: {
+    backgroundColor: '#007AFF',
+  },
+  toggleInactive: {
+    backgroundColor: '#E5E5EA',
+  },
+  toggleThumb: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+    transform: [{ translateX: 0 }],
+  },
+  toggleThumbActive: {
+    transform: [{ translateX: 20 }],
+  },
   groupNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   avatarWrapper: {
     marginRight: 12,
+    position: 'relative',
+  },
+  editPictureOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   groupNameContainer: {
     flex: 1,

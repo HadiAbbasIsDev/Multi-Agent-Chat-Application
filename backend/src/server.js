@@ -37,12 +37,14 @@ app.use(morgan(config.env === 'development' ? 'dev' : 'combined'));
 
 // Serve static files from uploads directory FIRST (before rate limiting)
 // Use absolute path to ensure consistency with multer upload directory
-// Convert relative path to absolute path relative to backend root
+// IMPORTANT: __dirname here is backend/src, so we go up 1 level to get backend root
+const backendRoot = path.resolve(__dirname, '..');
 const uploadsPath = path.isAbsolute(config.upload.uploadDir) 
   ? config.upload.uploadDir 
-  : path.resolve(__dirname, '..', config.upload.uploadDir.replace(/^\.\//, ''));
+  : path.resolve(backendRoot, config.upload.uploadDir.replace(/^\.\//, ''));
 
 console.log('📁 Serving static files from:', uploadsPath);
+console.log('📁 Backend root:', backendRoot);
 console.log('📁 __dirname:', __dirname);
 console.log('📁 Config uploadDir:', config.upload.uploadDir);
 

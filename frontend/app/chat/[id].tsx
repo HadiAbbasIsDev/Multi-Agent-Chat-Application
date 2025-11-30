@@ -32,6 +32,8 @@ interface Message {
   createdAt: string;
   editedAt?: string;
   isDeleted?: boolean;
+  isRead?: boolean;
+  isDelivered?: boolean;
   attachment?: {
     id: string;
     type: string;
@@ -93,6 +95,16 @@ export default function ChatScreen() {
       // Set up socket listeners
       setupSocketListeners();
       
+      // Mark all messages as read when chat is opened
+      const markAsRead = async () => {
+        try {
+          await api.markThreadAsRead(id);
+        } catch (error) {
+          console.error('Failed to mark messages as read:', error);
+        }
+      };
+      markAsRead();
+      
       // Clean up on unmount
       return () => {
         socketService.leaveThread(id);
@@ -126,6 +138,14 @@ export default function ChatScreen() {
           if (prev.some(m => m.id === message.id)) {
             console.log('⚠️ Message already exists, skipping:', message.id);
             return prev;
+          }
+          
+          // Mark as read if it's from the other person and we're viewing the chat
+          if (message.senderId !== user?.id && threadDetails?.type === 'DIRECT') {
+            // Auto-mark as read when viewing direct chat
+            api.markMessageAsRead(message.id).catch(err => 
+              console.error('Failed to mark message as read:', err)
+            );
           }
           
           // Add senderName if missing - get from threadDetails or current user
@@ -194,10 +214,24 @@ export default function ChatScreen() {
       }
     });
 
+    // Listen for read receipt updates
+    socketService.onMessageRead((data) => {
+      console.log('✅ Message read receipt received:', data);
+      if (data.threadId === id) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === data.messageId ? { ...msg, isRead: true, isDelivered: true } : msg
+          )
+        );
+      }
+    });
+
     // Listen for typing indicators
     socketService.onUserTyping((data) => {
-      if (data.threadId === id && data.userId !== user?.id) {
+      // Only show typing indicator for other users, not yourself
+      if (data.threadId === id && data.userId !== user?.id && data.displayName) {
         setTypingUsers((prev) => {
+          // Check if this user is already in the list
           if (!prev.includes(data.displayName)) {
             return [...prev, data.displayName];
           }
@@ -207,18 +241,31 @@ export default function ChatScreen() {
     });
 
     socketService.onUserStoppedTyping((data) => {
-      if (data.threadId === id) {
-        setTypingUsers((prev) => prev.filter((name) => name !== data.displayName));
+      // Only remove typing indicator for other users
+      if (data.threadId === id && data.userId !== user?.id && data.displayName) {
+        setTypingUsers((prev) => {
+          return prev.filter((name) => name !== data.displayName);
+        });
       }
     });
   };
 
   const cleanupSocketListeners = () => {
+    // Stop typing indicator when leaving
+    socketService.stopTyping(id);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    // Clear typing users
+    setTypingUsers([]);
+    
     socketService.off('new_message');
     socketService.off('message_edited');
     socketService.off('message_deleted');
     socketService.off('user_typing');
     socketService.off('user_stopped_typing');
+    socketService.off('message_read');
   };
 
   const loadThreadDetails = async () => {
@@ -250,10 +297,12 @@ export default function ChatScreen() {
         return timeB - timeA; // Newest first
       });
       
-      // Ensure all messages have attachment data if present
+      // Ensure all messages have attachment data and read receipt status
       messages = messages.map((msg: Message) => ({
         ...msg,
         attachment: msg.attachment || null,
+        isRead: msg.isRead || false,
+        isDelivered: msg.isDelivered || false,
       }));
       
       // Debug: Log messages with attachments
@@ -518,6 +567,7 @@ export default function ChatScreen() {
           avatarUrl={getThreadAvatarUrl()}
           size={40}
         />
+        <View style={{ width: 12 }} />
         <TouchableOpacity
           style={styles.nameContainer}
           onPress={() => {
@@ -607,12 +657,37 @@ export default function ChatScreen() {
               }
               
               return (
-                <View
+                <TouchableOpacity
                   key={item.id || `msg-${item.createdAt}`}
                   style={[
                     styles.messageBubble,
                     isMe ? styles.bubbleMe : styles.bubbleOther,
                   ]}
+                  onLongPress={() => {
+                    if (isMe && !item.isDeleted) {
+                      Alert.alert(
+                        'Message Options',
+                        'What would you like to do?',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Unsend',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                await api.unsendMessage(item.id);
+                                // Message will be updated via socket event
+                              } catch (error: any) {
+                                console.error('Unsend error:', error);
+                                Alert.alert('Error', error.response?.data?.error || 'Failed to unsend message');
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    }
+                  }}
+                  activeOpacity={isMe ? 0.7 : 1}
                 >
                   {!isMe && threadDetails?.type === 'GROUP' && item.senderName && (
                     <Text style={styles.senderName}>{item.senderName}</Text>
@@ -662,8 +737,26 @@ export default function ChatScreen() {
                       {formatTime(item.createdAt)}
                       {item.editedAt && ' (edited)'}
                     </Text>
+                    {isMe && (
+                      <View style={styles.readReceipt}>
+                        <Ionicons 
+                          name="checkmark" 
+                          size={16} 
+                          color={item.isRead ? '#007AFF' : '#999'} 
+                          style={styles.singleTick}
+                        />
+                        {item.isRead && (
+                          <Ionicons 
+                            name="checkmark" 
+                            size={16} 
+                            color="#007AFF" 
+                            style={styles.doubleTick}
+                          />
+                        )}
+                      </View>
+                    )}
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             }}
           />
@@ -889,6 +982,17 @@ const styles = StyleSheet.create({
   },
   time: { fontSize: 11, opacity: 0.7, alignSelf: 'flex-end' },
   timeMe: { color: '#fff' },
+  readReceipt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  singleTick: {
+    marginLeft: -2,
+  },
+  doubleTick: {
+    marginLeft: -8,
+  },
 
   // Deleted message
   deletedBubble: {

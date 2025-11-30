@@ -28,6 +28,10 @@ module.exports = {
     apiKey: process.env.AI_SERVICE_API_KEY
   },
   
+  rag: {
+    serviceUrl: process.env.RAG_SERVICE_URL || 'http://localhost:8000'
+  },
+  
   cors: {
     origins: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000']
   },
