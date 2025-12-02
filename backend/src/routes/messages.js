@@ -1,3 +1,4 @@
+// src/routes/messages.js
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -6,24 +7,17 @@ const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
 const { query, getClient } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
-const { sendMessageValidation, editMessageValidation, uuidParamValidation } = require('../middleware/validation');
+const { uuidParamValidation, editMessageValidation } = require('../middleware/validation');
 const config = require('../config');
 
 const router = express.Router();
 router.use(authenticateToken);
 
 // Configure multer for image uploads
-// Use absolute path to ensure consistency with static file serving
-// Convert relative path to absolute path relative to backend root
-// IMPORTANT: __dirname here is backend/src/routes, so we go up 2 levels to get backend root
 const backendRoot = path.resolve(__dirname, '..', '..');
 const uploadDir = path.isAbsolute(config.upload.uploadDir) 
   ? config.upload.uploadDir 
   : path.resolve(backendRoot, config.upload.uploadDir.replace(/^\.\//, ''));
-
-console.log('📁 Multer upload directory:', uploadDir);
-console.log('📁 Backend root:', backendRoot);
-console.log('📁 Config uploadDir:', config.upload.uploadDir);
 
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
@@ -69,7 +63,22 @@ async function isParticipant(userId, threadId) {
   return result.rows.length > 0;
 }
 
-// Send message
+// Helper function to get all thread participants except sender
+async function getThreadParticipants(threadId, excludeUserId) {
+  const result = await query(
+    `SELECT user_id FROM (
+      SELECT user_a_id as user_id FROM direct_threads WHERE thread_id = $1
+      UNION
+      SELECT user_b_id as user_id FROM direct_threads WHERE thread_id = $1
+      UNION
+      SELECT user_id FROM group_members WHERE group_id = $1
+    ) participants WHERE user_id != $2`,
+    [threadId, excludeUserId]
+  );
+  return result.rows.map(row => row.user_id);
+}
+
+// Send message with fault-tolerant delivery
 router.post('/:threadId', uuidParamValidation('threadId'), upload.single('image'), async (req, res) => {
   const client = await getClient();
   
@@ -84,6 +93,20 @@ router.post('/:threadId', uuidParamValidation('threadId'), upload.single('image'
     }
 
     await client.query('BEGIN');
+
+    // CRITICAL: Check if sender is online before allowing message send
+    const senderStatus = await client.query(
+      'SELECT is_online FROM user_connections WHERE user_id = $1',
+      [senderId]
+    );
+
+    if (!senderStatus.rows.length || !senderStatus.rows[0].is_online) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ 
+        error: 'Cannot send messages while offline',
+        code: 'OFFLINE_USER_CANNOT_SEND'
+      });
+    }
 
     // Check if thread exists
     const threadCheck = await client.query(
@@ -105,9 +128,9 @@ router.post('/:threadId', uuidParamValidation('threadId'), upload.single('image'
 
     // Insert message
     const messageResult = await client.query(
-      `INSERT INTO messages (thread_id, sender_id, body, status)
-       VALUES ($1, $2, $3, 'SENT')
-       RETURNING id, thread_id, sender_id, body, status, created_at`,
+      `INSERT INTO messages (thread_id, sender_id, body, status, delivery_status)
+       VALUES ($1, $2, $3, 'SENT', 'PENDING')
+       RETURNING id, thread_id, sender_id, body, status, delivery_status, created_at`,
       [threadId, senderId, messageBody || null]
     );
 
@@ -134,41 +157,61 @@ router.post('/:threadId', uuidParamValidation('threadId'), upload.single('image'
       [threadId]
     );
 
-    // Get all participants for read receipts
-    const participantsResult = await client.query(
-      `SELECT user_id FROM (
-        SELECT user_a_id as user_id FROM direct_threads WHERE thread_id = $1
-        UNION
-        SELECT user_b_id as user_id FROM direct_threads WHERE thread_id = $1
-        UNION
-        SELECT user_id FROM group_members WHERE group_id = $1
-      ) participants WHERE user_id != $2`,
-      [threadId, senderId]
-    );
+    // Get all participants for delivery
+    const recipientIds = await getThreadParticipants(threadId, senderId);
 
-    // Create read receipts for all participants except sender
-    // For direct chats, mark as delivered immediately
-    // For group chats, only create receipt (not delivered yet)
+    // Create read receipts for all participants
     const threadType = threadCheck.rows[0].type;
-    for (const participant of participantsResult.rows) {
-      if (threadType === 'DIRECT') {
-        // In direct chats, mark as delivered when message is sent
+    for (const recipientId of recipientIds) {
+      // Check if recipient is online
+      const recipientStatus = await client.query(
+        'SELECT is_online FROM user_connections WHERE user_id = $1',
+        [recipientId]
+      );
+
+      const isRecipientOnline = recipientStatus.rows.length > 0 && recipientStatus.rows[0].is_online;
+
+      if (threadType === 'DIRECT' && isRecipientOnline) {
+        // In direct chats with online recipient, mark as delivered
         await client.query(
           'INSERT INTO read_receipts (message_id, user_id, delivered_at) VALUES ($1, $2, CURRENT_TIMESTAMP)',
-          [message.id, participant.user_id]
+          [message.id, recipientId]
         );
       } else {
-        // In group chats, just create receipt (will be marked delivered when user sees it)
+        // Create receipt (will be marked delivered when user comes online)
         await client.query(
           'INSERT INTO read_receipts (message_id, user_id) VALUES ($1, $2)',
-          [message.id, participant.user_id]
+          [message.id, recipientId]
         );
       }
     }
 
     await client.query('COMMIT');
 
-    // Index message to Qdrant (async, don't wait for response)
+    // Enqueue message for fault-tolerant delivery
+    const messageQueueService = req.app.get('messageQueueService');
+    if (messageQueueService) {
+      try {
+        await messageQueueService.enqueueMessage(
+          message.id,
+          message.thread_id,
+          message.sender_id,
+          recipientIds
+        );
+      } catch (queueError) {
+        // If sender is offline, the enqueueMessage will throw OFFLINE_USER_CANNOT_SEND
+        // This should not happen as we already checked, but handle it anyway
+        console.error('Queue enqueue error:', queueError);
+        if (queueError.message === 'OFFLINE_USER_CANNOT_SEND') {
+          return res.status(403).json({ 
+            error: 'Cannot send messages while offline',
+            code: 'OFFLINE_USER_CANNOT_SEND'
+          });
+        }
+      }
+    }
+
+    // Index message to Qdrant (async)
     if (messageBody && messageBody.trim()) {
       axios.post(`${config.rag.serviceUrl}/index-message`, {
         message_id: message.id,
@@ -178,11 +221,10 @@ router.post('/:threadId', uuidParamValidation('threadId'), upload.single('image'
         created_at: message.created_at.toISOString()
       }).catch(err => {
         console.error('Failed to index message to RAG service:', err.message);
-        // Don't fail the request if indexing fails
       });
     }
 
-    // Emit socket event to all participants
+    // Also emit via WebSocket for immediate delivery to online users
     const io = req.app.get('io');
     io.to(threadId).emit('new_message', {
       id: message.id,
@@ -208,6 +250,7 @@ router.post('/:threadId', uuidParamValidation('threadId'), upload.single('image'
         senderId: message.sender_id,
         body: message.body,
         status: message.status,
+        deliveryStatus: message.delivery_status,
         createdAt: message.created_at,
         attachment: attachment ? {
           id: attachment.id,
@@ -221,13 +264,22 @@ router.post('/:threadId', uuidParamValidation('threadId'), upload.single('image'
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Send message error:', error);
+    
+    // Handle specific offline error
+    if (error.message === 'OFFLINE_USER_CANNOT_SEND') {
+      return res.status(403).json({ 
+        error: 'Cannot send messages while offline',
+        code: 'OFFLINE_USER_CANNOT_SEND'
+      });
+    }
+    
     res.status(500).json({ error: 'Failed to send message' });
   } finally {
     client.release();
   }
 });
 
-// Get messages in a thread
+// Get messages in a thread (with delivery status)
 router.get('/:threadId', uuidParamValidation('threadId'), async (req, res) => {
   try {
     const { threadId } = req.params;
@@ -240,18 +292,21 @@ router.get('/:threadId', uuidParamValidation('threadId'), async (req, res) => {
     }
 
     let queryText = `
-      SELECT m.id, m.thread_id, m.sender_id, m.body, m.status, m.created_at, m.edited_at,
+      SELECT m.id, m.thread_id, m.sender_id, m.body, m.status, m.delivery_status,
+             m.created_at, m.edited_at,
              u.display_name as sender_name, u.avatar_url as sender_avatar,
              a.id as attachment_id, a.type as attachment_type, a.mime_type, 
-             a.size_bytes, a.storage_url, a.width, a.height
+             a.size_bytes, a.storage_url, a.width, a.height,
+             rr.delivered_at, rr.read_at
       FROM messages m
       INNER JOIN users u ON m.sender_id = u.id
       LEFT JOIN attachments a ON m.id = a.message_id
-      WHERE m.thread_id = $1 AND m.deleted_at IS NULL
+      LEFT JOIN read_receipts rr ON m.id = rr.message_id AND rr.user_id = $1
+      WHERE m.thread_id = $2 AND m.deleted_at IS NULL
     `;
 
-    const params = [threadId];
-    let paramCount = 2;
+    const params = [req.user.id, threadId];
+    let paramCount = 3;
 
     if (before) {
       queryText += ` AND m.created_at < $${paramCount++}`;
@@ -271,10 +326,11 @@ router.get('/:threadId', uuidParamValidation('threadId'), async (req, res) => {
       senderAvatar: row.sender_avatar,
       body: row.body,
       status: row.status,
+      deliveryStatus: row.delivery_status,
       createdAt: row.created_at,
       editedAt: row.edited_at,
-      isRead: row.is_read || false,
-      isDelivered: row.is_delivered || false,
+      isRead: !!row.read_at,
+      isDelivered: !!row.delivered_at,
       attachment: row.attachment_id ? {
         id: row.attachment_id,
         type: row.attachment_type,
@@ -293,13 +349,59 @@ router.get('/:threadId', uuidParamValidation('threadId'), async (req, res) => {
   }
 });
 
+// Get pending messages for current user (for HTTP fallback/polling)
+router.get('/pending/me', async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const result = await query(
+      `SELECT m.id, m.thread_id, m.sender_id, m.body, m.status, m.created_at,
+              u.display_name as sender_name, u.avatar_url as sender_avatar,
+              a.id as attachment_id, a.type as attachment_type, 
+              a.mime_type, a.size_bytes, a.storage_url
+       FROM message_queue mq
+       INNER JOIN messages m ON mq.message_id = m.id
+       INNER JOIN users u ON m.sender_id = u.id
+       LEFT JOIN attachments a ON m.id = a.message_id
+       WHERE mq.recipient_id = $1 
+         AND mq.status IN ('PENDING', 'PROCESSING')
+         AND m.deleted_at IS NULL
+       ORDER BY m.created_at ASC
+       LIMIT 100`,
+      [userId]
+    );
+
+    const messages = result.rows.map(row => ({
+      id: row.id,
+      threadId: row.thread_id,
+      senderId: row.sender_id,
+      senderName: row.sender_name,
+      senderAvatar: row.sender_avatar,
+      body: row.body,
+      status: row.status,
+      createdAt: row.created_at,
+      attachment: row.attachment_id ? {
+        id: row.attachment_id,
+        type: row.attachment_type,
+        mimeType: row.mime_type,
+        sizeBytes: row.size_bytes,
+        storageUrl: row.storage_url
+      } : null
+    }));
+
+    res.json({ messages });
+  } catch (error) {
+    console.error('Get pending messages error:', error);
+    res.status(500).json({ error: 'Failed to fetch pending messages' });
+  }
+});
+
 // Edit message
 router.patch('/:messageId', [...uuidParamValidation('messageId'), ...editMessageValidation], async (req, res) => {
   try {
     const { messageId } = req.params;
     const { body: newBody } = req.body;
 
-    // Check if message exists and user is sender
     const messageCheck = await query(
       'SELECT id, sender_id, thread_id FROM messages WHERE id = $1 AND deleted_at IS NULL',
       [messageId]
@@ -313,7 +415,6 @@ router.patch('/:messageId', [...uuidParamValidation('messageId'), ...editMessage
       return res.status(403).json({ error: 'Can only edit your own messages' });
     }
 
-    // Update message
     const result = await query(
       `UPDATE messages
        SET body = $1, edited_at = CURRENT_TIMESTAMP
@@ -324,7 +425,6 @@ router.patch('/:messageId', [...uuidParamValidation('messageId'), ...editMessage
 
     const message = result.rows[0];
 
-    // Emit socket event
     const io = req.app.get('io');
     io.to(message.thread_id).emit('message_edited', {
       id: message.id,
@@ -347,7 +447,7 @@ router.patch('/:messageId', [...uuidParamValidation('messageId'), ...editMessage
   }
 });
 
-// Unsend message (permanently delete from PostgreSQL and Qdrant)
+// Unsend message
 router.post('/:messageId/unsend', uuidParamValidation('messageId'), async (req, res) => {
   try {
     const { messageId } = req.params;
@@ -367,28 +467,30 @@ router.post('/:messageId/unsend', uuidParamValidation('messageId'), async (req, 
       return res.status(403).json({ error: 'Can only unsend your own messages' });
     }
 
-    // Soft delete from PostgreSQL
+    // Soft delete
     await query(
       'UPDATE messages SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
       [messageId]
     );
 
-    // Delete from Qdrant if RAG service is available
+    // Cancel any pending deliveries
+    await query(
+      `UPDATE message_queue SET status = 'CANCELLED' 
+       WHERE message_id = $1 AND status = 'PENDING'`,
+      [messageId]
+    );
+
+    // Delete from Qdrant
     if (config.rag && config.rag.serviceUrl && message.body) {
       try {
-        const axios = require('axios');
         await axios.delete(`${config.rag.serviceUrl}/delete-message/${messageId}`, {
           timeout: 5000
-        }).catch(err => {
-          // Log but don't fail if Qdrant deletion fails
-          console.warn('Failed to delete message from Qdrant:', err.message);
         });
-      } catch (error) {
-        console.warn('Qdrant deletion error (non-critical):', error.message);
+      } catch (err) {
+        console.warn('Qdrant deletion error:', err.message);
       }
     }
 
-    // Emit socket event
     const io = req.app.get('io');
     io.to(message.thread_id).emit('message_deleted', {
       id: messageId,
@@ -399,69 +501,6 @@ router.post('/:messageId/unsend', uuidParamValidation('messageId'), async (req, 
   } catch (error) {
     console.error('Unsend message error:', error);
     res.status(500).json({ error: 'Failed to unsend message' });
-  }
-});
-
-// Delete message for all (within 10 minutes) - kept for backward compatibility
-router.delete('/:messageId', uuidParamValidation('messageId'), async (req, res) => {
-  try {
-    const { messageId } = req.params;
-
-    const messageCheck = await query(
-      'SELECT id, sender_id, thread_id, created_at, body FROM messages WHERE id = $1 AND deleted_at IS NULL',
-      [messageId]
-    );
-
-    if (messageCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Message not found' });
-    }
-
-    const message = messageCheck.rows[0];
-
-    if (message.sender_id !== req.user.id) {
-      return res.status(403).json({ error: 'Can only delete your own messages' });
-    }
-
-    // Check if within 10 minutes
-    const now = new Date();
-    const createdAt = new Date(message.created_at);
-    const timeDiff = now - createdAt;
-
-    if (timeDiff > config.constants.DELETE_MESSAGE_TIMEOUT) {
-      return res.status(400).json({ error: 'Can only delete messages within 10 minutes of sending' });
-    }
-
-    // Soft delete from PostgreSQL
-    await query(
-      'UPDATE messages SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [messageId]
-    );
-
-    // Delete from Qdrant if RAG service is available
-    if (config.rag && config.rag.serviceUrl && message.body) {
-      try {
-        const axios = require('axios');
-        await axios.delete(`${config.rag.serviceUrl}/delete-message/${messageId}`, {
-          timeout: 5000
-        }).catch(err => {
-          console.warn('Failed to delete message from Qdrant:', err.message);
-        });
-      } catch (error) {
-        console.warn('Qdrant deletion error (non-critical):', error.message);
-      }
-    }
-
-    // Emit socket event
-    const io = req.app.get('io');
-    io.to(message.thread_id).emit('message_deleted', {
-      id: messageId,
-      threadId: message.thread_id
-    });
-
-    res.json({ message: 'Message deleted' });
-  } catch (error) {
-    console.error('Delete message error:', error);
-    res.status(500).json({ error: 'Failed to delete message' });
   }
 });
 
@@ -477,7 +516,6 @@ router.post('/:messageId/delivered', uuidParamValidation('messageId'), async (re
       [messageId, req.user.id]
     );
 
-    // Emit socket event
     const io = req.app.get('io');
     const messageResult = await query('SELECT sender_id FROM messages WHERE id = $1', [messageId]);
     if (messageResult.rows.length > 0) {
@@ -512,13 +550,11 @@ router.post('/:messageId/read', uuidParamValidation('messageId'), async (req, re
       return res.json({ message: 'Message already read or not found' });
     }
 
-    // Update message status
     await query(
       `UPDATE messages SET status = 'READ' WHERE id = $1`,
       [messageId]
     );
 
-    // Emit socket event
     const io = req.app.get('io');
     const messageResult = await query('SELECT sender_id, thread_id FROM messages WHERE id = $1', [messageId]);
     if (messageResult.rows.length > 0) {
@@ -543,13 +579,11 @@ router.post('/thread/:threadId/read-all', uuidParamValidation('threadId'), async
     const { threadId } = req.params;
     const userId = req.user.id;
 
-    // Check if user is participant
     const isUserParticipant = await isParticipant(userId, threadId);
     if (!isUserParticipant) {
       return res.status(403).json({ error: 'Not a participant in this thread' });
     }
 
-    // Get all unread messages in this thread that are not sent by current user
     const unreadMessages = await query(
       `SELECT m.id, m.sender_id
        FROM messages m
@@ -561,7 +595,6 @@ router.post('/thread/:threadId/read-all', uuidParamValidation('threadId'), async
       [threadId, userId]
     );
 
-    // Mark all as read
     for (const msg of unreadMessages.rows) {
       await query(
         `INSERT INTO read_receipts (message_id, user_id, read_at, delivered_at)
@@ -572,13 +605,11 @@ router.post('/thread/:threadId/read-all', uuidParamValidation('threadId'), async
         [msg.id, userId]
       );
 
-      // Update message status
       await query(
         `UPDATE messages SET status = 'READ' WHERE id = $1`,
         [msg.id]
       );
 
-      // Emit socket event to sender
       const io = req.app.get('io');
       io.to(msg.sender_id).emit('message_read', {
         messageId: msg.id,

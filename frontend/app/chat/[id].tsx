@@ -311,7 +311,7 @@ export default function ChatScreen() {
         console.log('📷 Messages with attachments:', messagesWithAttachments.map((m: Message) => ({
           id: m.id,
           attachment: m.attachment,
-          url: m.attachment?.storageUrl ? `http://192.168.0.111:3000${m.attachment.storageUrl}` : null,
+          url: m.attachment?.storageUrl ? `http://192.168.1.107:3000${m.attachment.storageUrl}` : null,
         })));
       }
       
@@ -644,7 +644,7 @@ export default function ChatScreen() {
               
               // Construct image URL - use the same base URL as API
               const imageUrl = item.attachment?.storageUrl 
-                ? `http://192.168.0.111:3000${item.attachment.storageUrl}`
+                ? `http://192.168.0.107:3000${item.attachment.storageUrl}`
                 : null;
               
               // Debug attachment

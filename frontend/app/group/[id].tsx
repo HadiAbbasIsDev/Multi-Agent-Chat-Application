@@ -548,11 +548,11 @@ export default function GroupChatScreen() {
               }
 
               const isMe = item.senderId === user?.id;
-              // const SOCKET_URL ='http://192.168.0.111:3000';
+              // const SOCKET_URL ='http://192.168.1.107:3000';
 
               // Construct image URL
               const imageUrl = item.attachment?.storageUrl 
-                ? `http://192.168.0.111:3000${item.attachment.storageUrl}`
+                ? `http://192.168.1.107:3000${item.attachment.storageUrl}`
                 : null;
               
               // Debug attachment

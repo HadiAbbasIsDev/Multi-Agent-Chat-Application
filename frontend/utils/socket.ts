@@ -1,9 +1,9 @@
 import { io, Socket } from 'socket.io-client';
 import { storage } from './storage';
 
-// const SOCKET_URL = 'http://192.168.0.111:3000'; // Change to your backend IP
+// const SOCKET_URL = 'http://192.168.0.107:3000'; // Change to your backend IP
 
-const SOCKET_URL ='http://192.168.0.111:3000';
+const SOCKET_URL ='http://192.168.1.107:3000';
 class SocketService {
   private socket: Socket | null = null;
   private isConnected = false;

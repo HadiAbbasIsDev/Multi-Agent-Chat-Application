@@ -1,11 +1,15 @@
+// src/sockets/index.js
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const { query } = require('../config/database');
 
-// Store online users
-const onlineUsers = new Map(); // userId -> socketId
+// Store online users - Map<userId, socketId>
+const onlineUsers = new Map();
 
 module.exports = (io) => {
+  // Get MessageQueueService from app
+  const messageQueueService = io.messageQueueService;
+
   // Middleware for socket authentication
   io.use(async (socket, next) => {
     try {
@@ -37,10 +41,20 @@ module.exports = (io) => {
   });
 
   io.on('connection', async (socket) => {
-    console.log(`User connected: ${socket.userId}`);
+    console.log(`🟢 User connected: ${socket.userId}`);
     
     // Store user's socket ID
     onlineUsers.set(socket.userId, socket.id);
+
+    // Update user connection status in database
+    if (messageQueueService) {
+      await messageQueueService.updateUserConnection(
+        socket.userId, 
+        socket.id, 
+        true,
+        socket.handshake.headers['user-agent']
+      );
+    }
 
     // Update user's last active timestamp
     await query(
@@ -70,7 +84,7 @@ module.exports = (io) => {
       directThreads.rows.forEach(row => socket.join(row.thread_id));
       groupThreads.rows.forEach(row => socket.join(row.group_id));
 
-      console.log(`User ${socket.userId} joined ${directThreads.rows.length + groupThreads.rows.length} thread rooms`);
+      console.log(`📱 User ${socket.userId} joined ${directThreads.rows.length + groupThreads.rows.length} thread rooms`);
     } catch (error) {
       console.error('Error joining thread rooms:', error);
     }
@@ -98,6 +112,17 @@ module.exports = (io) => {
     } catch (error) {
       console.error('Error broadcasting online status:', error);
     }
+
+    // Handle heartbeat/ping to keep connection alive
+    socket.on('ping', () => {
+      socket.emit('pong');
+      
+      // Update last seen timestamp
+      query(
+        'UPDATE user_connections SET last_seen = CURRENT_TIMESTAMP WHERE user_id = $1',
+        [socket.userId]
+      ).catch(err => console.error('Ping update error:', err));
+    });
 
     // Handle typing indicator
     socket.on('typing_start', async (data) => {
@@ -159,14 +184,14 @@ module.exports = (io) => {
     socket.on('join_thread', (data) => {
       const { threadId } = data;
       socket.join(threadId);
-      console.log(`User ${socket.userId} joined thread ${threadId}`);
+      console.log(`📂 User ${socket.userId} joined thread ${threadId}`);
     });
 
     // Handle leave thread (when user closes a thread)
     socket.on('leave_thread', (data) => {
       const { threadId } = data;
       socket.leave(threadId);
-      console.log(`User ${socket.userId} left thread ${threadId}`);
+      console.log(`📂 User ${socket.userId} left thread ${threadId}`);
     });
 
     // Handle message read status update
@@ -205,10 +230,9 @@ module.exports = (io) => {
 
     // Handle video call signaling
     socket.on('call_initiate', async (data) => {
-      const { threadId, callType } = data; // callType: 'audio' | 'video'
+      const { threadId, callType } = data;
       
       try {
-        // Verify it's a direct thread
         const threadCheck = await query(
           `SELECT user_a_id, user_b_id FROM direct_threads 
            WHERE thread_id = $1 AND (user_a_id = $2 OR user_b_id = $2)`,
@@ -280,10 +304,19 @@ module.exports = (io) => {
 
     // Handle disconnect
     socket.on('disconnect', async () => {
-      console.log(`User disconnected: ${socket.userId}`);
+      console.log(`🔴 User disconnected: ${socket.userId}`);
       
       // Remove from online users
       onlineUsers.delete(socket.userId);
+
+      // Update user connection status
+      if (messageQueueService) {
+        await messageQueueService.updateUserConnection(
+          socket.userId,
+          null,
+          false
+        );
+      }
 
       // Update last active timestamp
       await query(
@@ -327,4 +360,7 @@ module.exports = (io) => {
     const socketId = onlineUsers.get(userId);
     return socketId ? io.sockets.sockets.get(socketId) : null;
   };
+
+  // Expose online users map
+  io.onlineUsers = onlineUsers;
 };

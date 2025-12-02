@@ -1,8 +1,8 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { storage } from './storage';
 
-// const API_URL = 'http://192.168.0.111:3000/api'; // Change to your backend IP
-const API_URL = 'http://192.168.0.111:3000/api';
+// const API_URL = 'http://192.168.0.107:3000/api'; // Change to your backend IP
+const API_URL = 'http://192.168.1.107:3000/api';
 class ApiClient {
   private client: AxiosInstance;
 

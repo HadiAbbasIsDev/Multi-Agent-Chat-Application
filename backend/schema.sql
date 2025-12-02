@@ -167,3 +167,125 @@ CREATE TABLE ai_results (
 
 CREATE INDEX idx_ai_results_query ON ai_results(query_id);
 CREATE INDEX idx_ai_results_citations ON ai_results USING GIN (citations);
+
+-- Migration: Add fault-tolerant messaging tables
+-- Run this with: psql -U your_user -d your_db -f src/database/add_fault_tolerant.sql
+
+-- Message Queue Table (for retry mechanism and offline users)
+CREATE TABLE IF NOT EXISTS message_queue (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    message_id UUID NOT NULL,
+    thread_id UUID NOT NULL,
+    sender_id UUID NOT NULL,
+    recipient_id UUID NOT NULL,
+    delivery_method VARCHAR(20) NOT NULL DEFAULT 'WEBSOCKET',
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    retry_count INT DEFAULT 0,
+    max_retries INT DEFAULT 5,
+    next_retry_at TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delivered_at TIMESTAMP,
+    failed_at TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT status_check CHECK (status IN ('PENDING', 'PROCESSING', 'DELIVERED', 'FAILED', 'CANCELLED')),
+    CONSTRAINT delivery_method_check CHECK (delivery_method IN ('WEBSOCKET', 'HTTP_FALLBACK', 'DATABASE_ONLY'))
+);
+
+CREATE INDEX idx_message_queue_status ON message_queue(status);
+CREATE INDEX idx_message_queue_recipient ON message_queue(recipient_id);
+CREATE INDEX idx_message_queue_retry ON message_queue(next_retry_at) WHERE status = 'PENDING';
+CREATE INDEX idx_message_queue_message ON message_queue(message_id);
+
+-- User Connection Status Table (track online/offline status accurately)
+CREATE TABLE IF NOT EXISTS user_connections (
+    user_id UUID PRIMARY KEY,
+    socket_id VARCHAR(255),
+    is_online BOOLEAN DEFAULT FALSE,
+    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    connection_quality VARCHAR(20) DEFAULT 'GOOD',
+    platform VARCHAR(50),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT connection_quality_check CHECK (connection_quality IN ('GOOD', 'POOR', 'DISCONNECTED'))
+);
+
+CREATE INDEX idx_user_connections_online ON user_connections(is_online);
+CREATE INDEX idx_user_connections_last_seen ON user_connections(last_seen);
+
+-- Message Delivery Attempts Log (for monitoring and debugging)
+CREATE TABLE IF NOT EXISTS message_delivery_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    message_id UUID NOT NULL,
+    queue_id UUID,
+    recipient_id UUID NOT NULL,
+    delivery_method VARCHAR(20) NOT NULL,
+    attempt_number INT NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    error_message TEXT,
+    latency_ms INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (queue_id) REFERENCES message_queue(id) ON DELETE SET NULL,
+    FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT delivery_status_check CHECK (status IN ('SUCCESS', 'FAILED', 'TIMEOUT', 'REJECTED'))
+);
+
+CREATE INDEX idx_delivery_logs_message ON message_delivery_logs(message_id);
+CREATE INDEX idx_delivery_logs_recipient ON message_delivery_logs(recipient_id, created_at DESC);
+CREATE INDEX idx_delivery_logs_created ON message_delivery_logs(created_at);
+
+-- Add delivery_status column to messages table for quick status checks
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(20) DEFAULT 'PENDING';
+ALTER TABLE messages ADD CONSTRAINT delivery_status_check CHECK (delivery_status IN ('PENDING', 'DELIVERED', 'FAILED', 'PARTIAL'));
+
+-- Function to automatically update user connection status
+CREATE OR REPLACE FUNCTION update_user_connection_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_user_connection_timestamp
+    BEFORE UPDATE ON user_connections
+    FOR EACH ROW
+    EXECUTE FUNCTION update_user_connection_timestamp();
+
+-- Function to clean up old delivery logs (keep last 30 days)
+CREATE OR REPLACE FUNCTION cleanup_old_delivery_logs()
+RETURNS void AS $$
+BEGIN
+    DELETE FROM message_delivery_logs
+    WHERE created_at < NOW() - INTERVAL '30 days';
+END;
+$$ LANGUAGE plpgsql;
+
+-- View for message delivery statistics
+CREATE OR REPLACE VIEW message_delivery_stats AS
+SELECT
+    m.id as message_id,
+    m.thread_id,
+    m.sender_id,
+    m.created_at,
+    m.delivery_status,
+    COUNT(DISTINCT mq.recipient_id) as total_recipients,
+    COUNT(DISTINCT CASE WHEN mq.status = 'DELIVERED' THEN mq.recipient_id END) as delivered_count,
+    COUNT(DISTINCT CASE WHEN mq.status = 'FAILED' THEN mq.recipient_id END) as failed_count,
+    COUNT(DISTINCT CASE WHEN mq.status = 'PENDING' THEN mq.recipient_id END) as pending_count,
+    AVG(mdl.latency_ms) as avg_latency_ms,
+    MAX(mq.retry_count) as max_retry_count
+FROM messages m
+LEFT JOIN message_queue mq ON m.id = mq.message_id
+LEFT JOIN message_delivery_logs mdl ON m.id = mdl.message_id AND mdl.status = 'SUCCESS'
+WHERE m.deleted_at IS NULL
+GROUP BY m.id, m.thread_id, m.sender_id, m.created_at, m.delivery_status;
+
+COMMENT ON TABLE message_queue IS 'Queue for managing message delivery with retry mechanism';
+COMMENT ON TABLE user_connections IS 'Real-time tracking of user online/offline status';
+COMMENT ON TABLE message_delivery_logs IS 'Audit log of all message delivery attempts';
+COMMENT ON VIEW message_delivery_stats IS 'Statistics view for message delivery performance';

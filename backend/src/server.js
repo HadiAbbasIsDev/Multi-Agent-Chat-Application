@@ -1,3 +1,4 @@
+// src/server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -9,6 +10,7 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const config = require('./config');
 const { pool } = require('./config/database');
+const MessageQueueService = require('./services/messageQueue');
 
 console.log('Environment loaded:', {
   DB_HOST: process.env.DB_HOST,
@@ -24,7 +26,12 @@ const io = new Server(server, {
   cors: {
     origin: config.cors.origins,
     methods: ['GET', 'POST']
-  }
+  },
+  pingTimeout: config.websocket.pingTimeout,
+  pingInterval: config.websocket.pingInterval,
+  maxHttpBufferSize: config.websocket.maxPayload,
+  transports: ['websocket', 'polling'], // Support both for redundancy
+  allowEIO3: true // Backward compatibility
 });
 
 // Middleware
@@ -35,23 +42,16 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan(config.env === 'development' ? 'dev' : 'combined'));
 
-// Serve static files from uploads directory FIRST (before rate limiting)
-// Use absolute path to ensure consistency with multer upload directory
-// IMPORTANT: __dirname here is backend/src, so we go up 1 level to get backend root
+// Serve static files from uploads directory
 const backendRoot = path.resolve(__dirname, '..');
 const uploadsPath = path.isAbsolute(config.upload.uploadDir) 
   ? config.upload.uploadDir 
   : path.resolve(backendRoot, config.upload.uploadDir.replace(/^\.\//, ''));
 
 console.log('📁 Serving static files from:', uploadsPath);
-console.log('📁 Backend root:', backendRoot);
-console.log('📁 __dirname:', __dirname);
-console.log('📁 Config uploadDir:', config.upload.uploadDir);
 
-// Serve static files - this must be before rate limiting and routes
 app.use('/uploads', express.static(uploadsPath, {
   setHeaders: (res, filePath) => {
-    // Set proper headers for images
     if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
       res.setHeader('Content-Type', 'image/jpeg');
     } else if (filePath.endsWith('.png')) {
@@ -64,11 +64,10 @@ app.use('/uploads', express.static(uploadsPath, {
   }
 }));
 
-// Rate limiting (only for API routes)
-// More lenient for GET requests, stricter for POST/PUT/DELETE
+// Rate limiting
 const getLimiter = rateLimit({
   windowMs: config.rateLimit.windowMs,
-  max: config.rateLimit.max * 3, // 3x more requests for GET
+  max: config.rateLimit.max * 3,
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -82,7 +81,6 @@ const postLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Apply different limiters based on method
 app.use('/api/', (req, res, next) => {
   if (req.method === 'GET') {
     return getLimiter(req, res, next);
@@ -91,8 +89,13 @@ app.use('/api/', (req, res, next) => {
   }
 });
 
-// Make io accessible to routes
+// Initialize Message Queue Service
+const messageQueueService = new MessageQueueService(io);
+io.messageQueueService = messageQueueService;
+
+// Make io and messageQueueService accessible to routes
 app.set('io', io);
+app.set('messageQueueService', messageQueueService);
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -103,9 +106,56 @@ app.use('/api/messages', require('./routes/messages'));
 app.use('/api/groups', require('./routes/groups'));
 app.use('/api/ai', require('./routes/ai'));
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+// Health check with system status
+app.get('/health', async (req, res) => {
+  try {
+    const dbCheck = await pool.query('SELECT 1');
+    
+    const queueStats = await pool.query(`
+      SELECT 
+        COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
+        COUNT(*) FILTER (WHERE status = 'PROCESSING') as processing,
+        COUNT(*) FILTER (WHERE status = 'FAILED') as failed,
+        COUNT(*) FILTER (WHERE status = 'DELIVERED') as delivered
+      FROM message_queue
+      WHERE created_at > NOW() - INTERVAL '1 hour'
+    `);
+
+    const onlineUsers = await pool.query(
+      'SELECT COUNT(*) as count FROM user_connections WHERE is_online = true'
+    );
+
+    res.json({ 
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      database: 'connected',
+      messageQueue: {
+        pending: parseInt(queueStats.rows[0].pending || 0),
+        processing: parseInt(queueStats.rows[0].processing || 0),
+        failed: parseInt(queueStats.rows[0].failed || 0),
+        delivered: parseInt(queueStats.rows[0].delivered || 0)
+      },
+      onlineUsers: parseInt(onlineUsers.rows[0].count || 0)
+    });
+  } catch (error) {
+    console.error('Health check error:', error);
+    res.status(503).json({ 
+      status: 'ERROR',
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
+});
+
+// Queue statistics endpoint (protected)
+app.get('/api/admin/queue-stats', async (req, res) => {
+  try {
+    const stats = await messageQueueService.getQueueStats();
+    res.json({ stats });
+  } catch (error) {
+    console.error('Queue stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch queue statistics' });
+  }
 });
 
 // 404 handler
@@ -125,22 +175,58 @@ app.use((err, req, res, next) => {
 // Socket.IO connection handling
 require('./sockets')(io);
 
+// Start Message Queue Service
+messageQueueService.start();
+
+// Schedule periodic cleanup of old delivery logs
+setInterval(() => {
+  messageQueueService.cleanupOldLogs();
+}, 24 * 60 * 60 * 1000); // Run daily
+
 // Start server
 const PORT = config.port;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT} in ${config.env} mode`);
+  console.log(`
+╔════════════════════════════════════════════╗
+║   🚀 Server Started Successfully          ║
+╠════════════════════════════════════════════╣
+║   Port: ${PORT.toString().padEnd(34)} ║
+║   Environment: ${config.env.padEnd(27)} ║
+║   Message Queue: Active                   ║
+║   WebSocket: Active                       ║
+║   Fault Tolerance: Enabled                ║
+║   Max Retries: ${config.messageDelivery.maxRetries.toString().padEnd(27)} ║
+║   Queue Interval: ${config.messageDelivery.queueProcessorInterval}ms${' '.repeat(18)} ║
+╚════════════════════════════════════════════╝
+  `);
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
+const gracefulShutdown = () => {
+  console.log('\n🛑 Shutting down gracefully...');
+  
+  // Stop accepting new connections
   server.close(() => {
-    console.log('HTTP server closed');
+    console.log('✅ HTTP server closed');
+    
+    // Stop message queue service
+    messageQueueService.stop();
+    
+    // Close database pool
     pool.end(() => {
-      console.log('Database pool closed');
+      console.log('✅ Database pool closed');
       process.exit(0);
     });
   });
-});
 
-module.exports = { app, io };
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.error('⚠️  Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
+module.exports = { app, io, messageQueueService };

@@ -45,5 +45,52 @@ module.exports = {
     MAX_GROUP_MEMBERS: 200,
     DELETE_MESSAGE_TIMEOUT: 600000, // 10 minutes in ms
     ALLOWED_EMAIL_DOMAIN: '@nu.edu.pk'
+  },
+
+  // NEW: Fault-Tolerant Message Delivery Configuration
+  messageDelivery: {
+    // Maximum number of retry attempts before marking as failed
+    maxRetries: parseInt(process.env.MESSAGE_MAX_RETRIES) || 5,
+    
+    // Exponential backoff intervals in milliseconds [1s, 2s, 5s, 10s, 30s]
+    retryIntervals: process.env.MESSAGE_RETRY_INTERVALS 
+      ? JSON.parse(process.env.MESSAGE_RETRY_INTERVALS)
+      : [1000, 2000, 5000, 10000, 30000],
+    
+    // WebSocket delivery timeout in milliseconds
+    socketTimeout: parseInt(process.env.MESSAGE_SOCKET_TIMEOUT) || 5000,
+    
+    // Enable HTTP fallback for message delivery
+    enableHttpFallback: process.env.ENABLE_HTTP_FALLBACK !== 'false',
+    
+    // Queue processor interval in milliseconds
+    queueProcessorInterval: parseInt(process.env.QUEUE_PROCESSOR_INTERVAL) || 2000,
+    
+    // Maximum messages to process per batch
+    maxBatchSize: parseInt(process.env.MESSAGE_QUEUE_BATCH_SIZE) || 50,
+    
+    // Auto-cleanup old delivery logs (days)
+    deliveryLogRetentionDays: parseInt(process.env.DELIVERY_LOG_RETENTION_DAYS) || 30,
+    
+    // Connection quality check interval (milliseconds)
+    connectionCheckInterval: parseInt(process.env.CONNECTION_CHECK_INTERVAL) || 10000,
+    
+    // Consider user offline after this many milliseconds of inactivity
+    offlineThreshold: parseInt(process.env.USER_OFFLINE_THRESHOLD) || 30000
+  },
+
+  // WebSocket Configuration
+  websocket: {
+    // Ping timeout
+    pingTimeout: parseInt(process.env.WS_PING_TIMEOUT) || 60000,
+    
+    // Ping interval
+    pingInterval: parseInt(process.env.WS_PING_INTERVAL) || 25000,
+    
+    // Enable compression
+    enableCompression: process.env.WS_ENABLE_COMPRESSION !== 'false',
+    
+    // Maximum payload size
+    maxPayload: parseInt(process.env.WS_MAX_PAYLOAD) || 1048576 // 1MB
   }
 };
