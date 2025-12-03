@@ -202,8 +202,7 @@ async function runMigration() {
       UPDATE messages 
       SET delivery_status = 'DELIVERED' 
       WHERE deleted_at IS NULL 
-      AND delivery_status IS NULL
-      RETURNING COUNT(*);
+      AND delivery_status IS NULL;
     `);
     console.log(`✅ Updated ${messagesResult.rowCount} existing messages\n`);
 
@@ -212,10 +211,9 @@ async function runMigration() {
       INSERT INTO user_connections (user_id, is_online, last_seen)
       SELECT id, false, COALESCE(last_active_at, CURRENT_TIMESTAMP)
       FROM users
-      ON CONFLICT (user_id) DO NOTHING
-      RETURNING user_id;
+      ON CONFLICT (user_id) DO NOTHING;
     `);
-    console.log(`✅ Initialized ${usersResult.rowCount} user connections\n`);
+    console.log(`✅ Initialized user connections\n`);
 
     await client.query('COMMIT');
 

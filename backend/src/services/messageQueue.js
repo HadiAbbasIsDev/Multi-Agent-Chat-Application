@@ -134,7 +134,8 @@ class MessageQueueService {
       }
 
     } catch (error) {
-      console.error('❌ Queue processing error:', error);
+      console.error('❌ Queue processing error:', error.message);
+      console.warn('⚠️  Message queue temporarily unavailable. Will retry...');
     } finally {
       this.isProcessing = false;
     }
@@ -402,7 +403,8 @@ class MessageQueueService {
       );
 
     } catch (error) {
-      console.error('❌ Connection quality monitor error:', error);
+      console.error('❌ Connection quality monitor error:', error.message);
+      console.warn('⚠️  Connection monitor temporarily unavailable. Will retry...');
     }
   }
 

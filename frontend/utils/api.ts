@@ -2,14 +2,15 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { storage } from './storage';
 
 // const API_URL = 'http://192.168.0.107:3000/api'; // Change to your backend IP
-const API_URL = 'http://192.168.1.107:3000/api';
+const API_URL = 'http://192.168.1.31:3000/api';
+
 class ApiClient {
-  private client: AxiosInstance;
+  public client: AxiosInstance; // Changed to public so Context can access it if needed
 
   constructor() {
     this.client = axios.create({
       baseURL: API_URL,
-      timeout: 1000000,
+      timeout: 10000, // Reduced to 10s for faster failover
       headers: {
         'Content-Type': 'application/json',
       },
@@ -32,7 +33,6 @@ class ApiClient {
       (response) => response,
       async (error: AxiosError) => {
         if (error.response?.status === 401) {
-          // Token expired or invalid - clear auth and redirect to login
           await storage.clearAll();
         }
         return Promise.reject(error);
@@ -155,7 +155,6 @@ class ApiClient {
     const formData = new FormData();
     formData.append('body', body);
     if (image) {
-      // React Native FormData format
       formData.append('image', {
         uri: image.uri,
         type: image.type || 'image/jpeg',
@@ -193,6 +192,20 @@ class ApiClient {
 
   async markThreadAsRead(threadId: string) {
     const response = await this.client.post(`/messages/thread/${threadId}/read-all`);
+    return response.data;
+  }
+
+  // ==================== Fault Tolerance Endpoints (NEW) ====================
+  
+  // Poll for messages when WebSocket is poor/offline
+  async getPendingMessages() {
+    const response = await this.client.get('/messages/pending/me');
+    return response.data; // Returns { messages: [...] }
+  }
+
+  // Check delivery status of a specific message
+  async getMessageDeliveryStatus(messageId: string) {
+    const response = await this.client.get(`/messages/${messageId}/delivery-status`);
     return response.data;
   }
 

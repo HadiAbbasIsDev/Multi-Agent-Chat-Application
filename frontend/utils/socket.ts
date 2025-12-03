@@ -2,15 +2,14 @@ import { io, Socket } from 'socket.io-client';
 import { storage } from './storage';
 
 // const SOCKET_URL = 'http://192.168.0.107:3000'; // Change to your backend IP
+const SOCKET_URL = 'http://192.168.1.31:3000';
 
-const SOCKET_URL ='http://192.168.1.107:3000';
 class SocketService {
   private socket: Socket | null = null;
-  private isConnected = false;
+  public isConnected = false;
 
   async connect() {
     if (this.socket && this.isConnected) { 
-      console.log('Socket already connected');
       return;
     }
 
@@ -43,10 +42,6 @@ class SocketService {
     this.socket.on('connect_error', (error) => {
       console.error('❌ Socket connection error:', error.message);
     });
-
-    this.socket.on('error', (error) => {
-      console.error('❌ Socket error:', error);
-    });
   }
 
   disconnect() {
@@ -55,6 +50,39 @@ class SocketService {
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
+    }
+  }
+
+  // --- NEW: Latency Check for Connection Quality ---
+  ping(callback: (latency: number) => void) {
+    if (!this.socket || !this.isConnected) return;
+
+    const start = Date.now();
+    // Emit 'ping' to backend
+    this.socket.emit('ping');
+    
+    // Listen for 'pong' response once
+    this.socket.once('pong', () => {
+      const latency = Date.now() - start;
+      callback(latency);
+    });
+  }
+
+  // --- UPDATED: Handle Message with Acknowledgement ---
+  onNewMessage(callback: (message: any) => void) {
+    if (this.socket) {
+      // Backend emits: (data, ackCallback)
+      this.socket.on('new_message', (data, ackCallback) => {
+        // 1. Give message to frontend
+        callback(data);
+        
+        // 2. Acknowledge receipt to backend immediately
+        // This tells the queue to stop retrying this message
+        if (typeof ackCallback === 'function') {
+          console.log(`⚡ Acknowledging message ${data.id}`);
+          ackCallback('received'); 
+        }
+      });
     }
   }
 
@@ -71,13 +99,6 @@ class SocketService {
     if (this.socket) {
       console.log('Leaving thread:', threadId);
       this.socket.emit('leave_thread', { threadId });
-    }
-  }
-
-  // Listen for new messages
-  onNewMessage(callback: (message: any) => void) {
-    if (this.socket) {
-      this.socket.on('new_message', callback);
     }
   }
 
@@ -149,7 +170,7 @@ class SocketService {
     }
   }
 
-  // Listen for contact requests
+  // Contact/Group events...
   onContactRequestReceived(callback: (data: any) => void) {
     if (this.socket) {
       this.socket.on('contact_request_received', callback);
@@ -162,7 +183,6 @@ class SocketService {
     }
   }
 
-  // Listen for group events
   onAddedToGroup(callback: (data: any) => void) {
     if (this.socket) {
       this.socket.on('added_to_group', callback);
@@ -187,33 +207,17 @@ class SocketService {
     }
   }
 
-  // onMessageRead(callback: (data: any) => void) {
-  //   if (this.socket) {
-  //     this.socket.on('message_read', callback);
-  //   }
-  // }
-
-  // Remove all listeners
   removeAllListeners() {
     if (this.socket) {
       this.socket.removeAllListeners();
     }
   }
 
-  // Remove specific listener
   off(event: string) {
     if (this.socket) {
       this.socket.off(event);
     }
   }
-
-  // Get connection status
-  getConnectionStatus() {
-    return this.isConnected;
-  }
 }
 
 export const socketService = new SocketService();
-
-
-
