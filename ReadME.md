@@ -20,6 +20,9 @@ Frontend (React Native) → Backend (Django) → PostgreSQL
 This Repo contains backend for communication pipelines, the actual VECTOR Backend is in a seperate repo "- LLM-Retrieval-Agent"
 ---
 
+## Retrieval Architecte:
+![Description](frontend/utils/working3.jpeg)
+
 ## Key Features
 
 - Real-time messaging using WebSockets  
@@ -46,7 +49,7 @@ User Query → Embedding Model (BGE-Large) → Qdrant Vector Search
 ---
 
 ## Demonstration
-
+![Description](frontend/utils/working1.jpeg)
 ### Example User Query
+![Description](frontend/utils/working2.jpeg)
 
-User:
